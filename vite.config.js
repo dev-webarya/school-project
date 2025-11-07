@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: '/<repo-name>/', // set to your new repo name
+  base: '/School_F-B/',
   server: {
     proxy: {
       '/api': {
