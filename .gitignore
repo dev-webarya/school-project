@@ -89,3 +89,22 @@ jspm_packages/
 
 # DynamoDB Local files
 .dynamodb/
+
+# Additional sensitive files (do not commit)
+# Ignore all env files in any folder, but keep examples tracked
+**/.env*
+!**/.env.example
+
+# Root environment variants often used locally
+.env.development
+.env.production
+.env.staging
+
+# Private keys and certificates
+*.pem
+*.key
+*.crt
+
+# Local config files with tokens
+.npmrc
+.yarnrc.yml

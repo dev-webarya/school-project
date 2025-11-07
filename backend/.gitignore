@@ -1,0 +1,19 @@
+.env
+// ... existing code ...
+# Ignore all env files within backend except example templates
+.env.local
+.env.development
+.env.production
+.env.staging
+!*.env.example
+
+# Private keys and certificates
+*.pem
+*.key
+*.crt
+
+# Local npm/yarn configs
+.npmrc
+.yarnrc.yml
+node_modules
+.env.example  
