@@ -1505,7 +1505,7 @@ router.get('/fees', async (req, res) => {
 // @route   POST /api/admin/fees/structure
 // @desc    Create or update fee structure
 // @access  Private (Admin only)
-router.post('/fees/structure', async (req, res) => {
+router.post('/fees/structure', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const {
       class: className,
@@ -1565,19 +1565,76 @@ router.post('/fees/structure', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Create fee structure error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error creating fee structure',
-      error: error.message
+  console.error('Create fee structure error:', error);
+  res.status(500).json({
+    success: false,
+    message: 'Error creating fee structure',
+    error: error.message
+  });
+}
+});
+
+// @route   POST /api/admin/grades
+// @desc    Create a grade record
+// @access  Private (Admin and Faculty)
+router.post('/grades', authenticateToken, requireRole(['admin', 'faculty']), async (req, res) => {
+  try {
+    const {
+      student,
+      course,
+      faculty,
+      assessmentType,
+      assessmentName,
+      maxMarks,
+      obtainedMarks,
+      assessmentDate,
+      academicYear,
+      session,
+      remarks,
+      isPublished
+    } = req.body || {};
+
+    // Basic validation
+    const missing = [];
+    if (!student) missing.push('student');
+    if (!course) missing.push('course');
+    if (!faculty) missing.push('faculty');
+    if (!assessmentType) missing.push('assessmentType');
+    if (!assessmentName) missing.push('assessmentName');
+    if (maxMarks === undefined) missing.push('maxMarks');
+    if (obtainedMarks === undefined) missing.push('obtainedMarks');
+    if (!assessmentDate) missing.push('assessmentDate');
+    if (!session) missing.push('session');
+    if (missing.length) {
+      return res.status(400).json({ success: false, message: `Missing fields: ${missing.join(', ')}` });
+    }
+
+    const doc = await Grade.create({
+      student,
+      course,
+      faculty,
+      assessmentType,
+      assessmentName,
+      maxMarks: Number(maxMarks),
+      obtainedMarks: Number(obtainedMarks),
+      assessmentDate: new Date(assessmentDate),
+      academicYear: academicYear,
+      session: String(session),
+      remarks,
+      isPublished: !!isPublished
     });
+
+    res.status(201).json({ success: true, data: doc });
+  } catch (error) {
+    console.error('Create grade error:', error);
+    res.status(500).json({ success: false, message: 'Error creating grade', error: error.message });
   }
 });
 
 // @route   POST /api/admin/fees/payment
 // @desc    Record fee payment
 // @access  Private (Admin only)
-router.post('/fees/payment', async (req, res) => {
+router.post('/fees/payment', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const {
       studentId,

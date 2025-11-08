@@ -82,16 +82,21 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', require('./routes/auth'));
-app.use('/api/admin', require('./routes/admin'));
-app.use('/api/faculty', require('./routes/faculty'));
-app.use('/api/student', require('./routes/student'));
-app.use('/api/general', require('./routes/general'));
-app.use('/api/payments', require('./routes/payments'));
+  app.use('/api/auth', require('./routes/auth'));
+  app.use('/api/admin', require('./routes/admin'));
+  app.use('/api/faculty', require('./routes/faculty'));
+  app.use('/api/student', require('./routes/student'));
+  app.use('/api/general', require('./routes/general'));
+  // Newly mounted domain routers
+  app.use('/api/subjects', require('./routes/subjects'));
+  app.use('/api/courses', require('./routes/courses'));
+  app.use('/api/calendar', require('./routes/calendar'));
+  app.use('/api/transport', require('./routes/transport'));
+  app.use('/api/payments', require('./routes/payments'));
 // E2E test-only routes
 // Mount unconditionally to ensure test helpers are always available in dev
 console.log('🧪 E2E routes mounted at /api/e2e');
-app.use('/api/e2e', require('./routes/e2e'));
+  app.use('/api/e2e', require('./routes/e2e'));
 
 // Serve frontend production build (same-origin) to avoid CORS in production
 const distPath = path.join(__dirname, '../../dist');

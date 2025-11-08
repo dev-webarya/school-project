@@ -5,6 +5,7 @@ const Student = require('../models/Student');
 const Faculty = require('../models/Faculty');
 const Course = require('../models/Course');
 const Subject = require('../models/Subject');
+const Admission = require('../models/Admission');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -176,6 +177,53 @@ router.get('/subjects/public', async (req, res) => {
       message: 'Error fetching subjects',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
+  }
+});
+
+// Public admissions submission
+router.post('/admissions', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    // Generate applicationNumber if not provided
+    const applicationNumber = payload.applicationNumber || `APP-${Date.now()}`;
+
+    // Basic required fields check to give clearer errors to the UI
+    const required = [
+      payload.studentInfo?.fullName,
+      payload.studentInfo?.dateOfBirth,
+      payload.studentInfo?.gender,
+      payload.academicInfo?.applyingForClass,
+      payload.academicInfo?.academicYear,
+      payload.contactInfo?.email,
+      payload.contactInfo?.phone,
+      payload.contactInfo?.address?.street,
+      payload.contactInfo?.address?.city,
+      payload.contactInfo?.address?.state,
+      payload.contactInfo?.address?.pincode,
+      payload.parentInfo?.father?.name,
+      payload.parentInfo?.father?.phone
+    ];
+    if (required.some((v) => v === undefined || v === null || v === '')) {
+      return res.status(400).json({ success: false, message: 'Missing required admission fields' });
+    }
+
+    const doc = await Admission.create({
+      ...payload,
+      applicationNumber,
+      status: 'submitted',
+      feeInfo: {
+        admissionFee: payload.feeInfo?.admissionFee ?? 5000,
+        paymentMethod: payload.feeInfo?.paymentMethod ?? 'online',
+        paymentStatus: payload.feeInfo?.paymentStatus ?? 'pending',
+        paymentDetails: payload.feeInfo?.paymentDetails ?? {}
+      }
+    });
+
+    res.status(201).json({ success: true, data: doc });
+  } catch (error) {
+    console.error('General POST /admissions error:', error);
+    const msg = error?.message?.includes('validation') ? 'Invalid admission data' : 'Failed to submit admission';
+    res.status(500).json({ success: false, message: msg });
   }
 });
 
