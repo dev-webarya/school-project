@@ -75,13 +75,6 @@ router.get('/dashboard', authenticateToken, requireRole(['faculty']), async (req
         message: 'Attendance marked for Mathematics class',
         time: getTimeAgo(new Date(Date.now() - 4 * 60 * 60 * 1000)),
         class: '10-B'
-      },
-      {
-        id: 3,
-        type: 'grade',
-        message: 'Grades updated for Physics test',
-        time: getTimeAgo(new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)),
-        class: '10-A'
       }
     ];
 

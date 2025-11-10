@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Counter = require('./Counter');
 
 const studentSchema = new mongoose.Schema({
   // Reference to User model
@@ -245,8 +246,33 @@ studentSchema.pre('validate', async function(next) {
   if (this.isNew && !this.studentId) {
     try {
       const yearSuffix = (new Date().getFullYear()).toString().slice(-2);
-      const count = await this.constructor.countDocuments({ academicYear: this.academicYear });
-      this.studentId = `STU${yearSuffix}${String(count + 1).padStart(4, '0')}`;
+      const key = `studentId:${this.academicYear}`;
+
+      // Seed counter from current max for this academic year if it doesn't exist
+      let counterDoc = await Counter.findOne({ key });
+      if (!counterDoc) {
+        const prefix = `STU${yearSuffix}`;
+        const existing = await this.constructor.find({ academicYear: this.academicYear, studentId: { $regex: `^${prefix}\\d{4}$` } })
+          .select('studentId')
+          .sort({ studentId: -1 })
+          .limit(1);
+        let maxSeq = 0;
+        if (existing && existing.length > 0) {
+          const tail = existing[0].studentId.slice(prefix.length);
+          const parsed = parseInt(tail, 10);
+          if (!isNaN(parsed)) maxSeq = parsed;
+        }
+        // Create counter with maxSeq to preserve continuity
+        counterDoc = await Counter.findOneAndUpdate(
+          { key },
+          { $setOnInsert: { seq: maxSeq } },
+          { new: true, upsert: true }
+        );
+      }
+
+      // Atomically get next sequence
+      const nextSeq = await Counter.next(key);
+      this.studentId = `STU${yearSuffix}${String(nextSeq).padStart(4, '0')}`;
     } catch (error) {
       return next(error);
     }

@@ -21,6 +21,10 @@ router.post('/login', [
   body('role').isIn(['admin', 'faculty', 'student']).withMessage('Invalid role')
 ], async (req, res) => {
   try {
+    if (process.env.NODE_ENV !== 'production') {
+      const safeBody = { email: req.body?.email, role: req.body?.role };
+      console.log('[Auth] Incoming login request:', safeBody);
+    }
     // Check for validation errors
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -35,7 +39,22 @@ router.post('/login', [
 
     // Find user by email and role
     const user = await User.findOne({ email, role }).select('+password');
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[Auth] Lookup by email+role:', { email, role, userFound: !!user });
+    }
     if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Defensive: if password is missing on the user record, treat as invalid
+    if (!user.password) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[Auth] Missing password field on user record');
+      }
+      await user.incLoginAttempts();
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -50,8 +69,19 @@ router.post('/login', [
       });
     }
 
-    // Check password
-    const isPasswordValid = await user.comparePassword(password);
+    // Check password with defensive error handling
+    let isPasswordValid = false;
+    try {
+      isPasswordValid = await user.comparePassword(password);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[Auth] Password compare result:', { email, role, ok: isPasswordValid });
+      }
+    } catch (err) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.error('[Auth] Password compare error:', err?.message || err);
+      }
+      isPasswordValid = false;
+    }
     if (!isPasswordValid) {
       // Increment login attempts
       await user.incLoginAttempts();

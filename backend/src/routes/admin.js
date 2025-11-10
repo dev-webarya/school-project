@@ -99,68 +99,61 @@ function getTimeAgo(date) {
 }
 
 // @route   GET /api/admin/students
-// @desc    Get all students
+// @desc    Get all students with populated user details
 // @access  Private (Admin only)
 router.get('/students', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', class: studentClass = '' } = req.query;
-    
-    // Build query
-    let query = { role: 'student', status: 'active' };
-    
-    if (search) {
-      query.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
-      ];
-    }
 
-    // Calculate pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    
-    // Get students with pagination
-    const students = await User.find(query)
-      .select('firstName lastName email phone dateOfBirth createdAt status')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
 
-    // Get total count for pagination
-    const totalStudents = await User.countDocuments(query);
-    const totalPages = Math.ceil(totalStudents / parseInt(limit));
+    const match = { status: 'active' };
+    if (studentClass) match.class = studentClass;
 
-    // Transform data for frontend
-    const studentsData = students.map(student => ({
-      id: student._id,
-      name: `${student.firstName} ${student.lastName}`,
-      email: student.email,
-      phone: student.phone || 'N/A',
-      class: 'Class 10', // This would come from Student model
-      admissionDate: student.createdAt.toLocaleDateString(),
-      status: student.status
-    }));
+    const searchRegex = search ? new RegExp(search, 'i') : null;
+
+    const pipeline = [
+      { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'user' } },
+      { $unwind: '$user' },
+      { $match: {
+        ...match,
+        ...(searchRegex ? {
+          $or: [
+            { rollNumber: searchRegex },
+            { 'user.firstName': searchRegex },
+            { 'user.lastName': searchRegex },
+            { 'user.email': searchRegex }
+          ]
+        } : {})
+      } },
+      { $match: { 'user.status': 'active' } },
+      { $sort: { createdAt: -1 } },
+      { $facet: { data: [{ $skip: skip }, { $limit: limitNum }], totalCount: [{ $count: 'count' }] } }
+    ];
+
+    const agg = await Student.aggregate(pipeline);
+    const students = (agg[0]?.data) || [];
+    const totalStudents = (agg[0]?.totalCount?.[0]?.count) || 0;
+    const totalPages = Math.max(1, Math.ceil(totalStudents / limitNum));
 
     res.json({
       success: true,
       data: {
-        students: studentsData,
+        students,
         pagination: {
-          currentPage: parseInt(page),
+          currentPage: pageNum,
           totalPages,
           totalStudents,
-          hasNext: parseInt(page) < totalPages,
-          hasPrev: parseInt(page) > 1
+          hasNext: pageNum < totalPages,
+          hasPrev: pageNum > 1
         }
       }
     });
   } catch (error) {
     console.error('Get students error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching students',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Error fetching students', error: error.message });
   }
 });
 
@@ -322,6 +315,22 @@ router.post('/students', authenticateToken, requireRole(['admin']), async (req, 
       });
     }
 
+    // Validate dates early to avoid CastError 500s
+    const isValidDate = (val) => {
+      const d = new Date(val);
+      return !isNaN(d.getTime());
+    };
+    const dateErrors = [];
+    if (!isValidDate(dateOfBirth)) {
+      dateErrors.push({ path: 'dateOfBirth', message: 'Invalid date format' });
+    }
+    if (!isValidDate(admissionDate)) {
+      dateErrors.push({ path: 'admissionDate', message: 'Invalid date format' });
+    }
+    if (dateErrors.length) {
+      return res.status(422).json({ success: false, message: 'Validation failed', errors: dateErrors });
+    }
+
     // Normalize and validate phone numbers
     const normalizeDigits = (val) => (val ? String(val).replace(/\D/g, '') : '');
     const phoneDigits = normalizeDigits(phone);
@@ -340,8 +349,8 @@ router.post('/students', authenticateToken, requireRole(['admin']), async (req, 
     const [firstName, ...rest] = name.trim().split(' ');
     const lastName = rest.join(' ') || '';
 
-    // Create user with default password
-    const defaultPassword = 'student123';
+    // Create user with password from request if provided, otherwise fallback to student's 10-digit mobile number
+    const defaultPassword = (typeof req.body.password === 'string' && req.body.password.trim()) ? req.body.password.trim() : phoneDigits;
 
     // Build emergency contact object if provided as a phone string
     let emergencyContactObj;
@@ -385,6 +394,10 @@ router.post('/students', authenticateToken, requireRole(['admin']), async (req, 
       '11th': '11', '12th': '12'
     };
     const normalizedClass = classMap[studentClass] || studentClass;
+    const normalizedSection = typeof section === 'string' ? section.trim().toUpperCase() : section;
+    if (typeof normalizedSection === 'string' && normalizedSection.length > 2) {
+      return res.status(422).json({ success: false, message: 'Validation failed', errors: [{ path: 'section', message: 'Section cannot exceed 2 characters' }] });
+    }
 
     const guardianValid = guardianDigits.length === 10;
     student = new Student({
@@ -392,7 +405,7 @@ router.post('/students', authenticateToken, requireRole(['admin']), async (req, 
       studentId: undefined, // will be generated by pre-save
       rollNumber,
       class: normalizedClass,
-      section: typeof section === 'string' ? section.toUpperCase() : section,
+      section: normalizedSection,
       academicYear,
       admissionDate: new Date(admissionDate),
       admissionNumber,
@@ -434,6 +447,17 @@ router.post('/students', authenticateToken, requireRole(['admin']), async (req, 
       } catch (cleanupErr) {
         console.error('Rollback failed: could not delete user', cleanupErr);
       }
+    }
+    // Duplicate key errors (e.g., email, admissionNumber, studentId)
+    if (error && (error.code === 11000 || error.name === 'MongoServerError')) {
+      const key = (error.keyPattern && Object.keys(error.keyPattern)[0]) || (error.keyValue && Object.keys(error.keyValue)[0]) || 'unknown';
+      const val = (error.keyValue && error.keyValue[key]) || undefined;
+      const message = `Duplicate value for '${key}'${val ? `: ${val}` : ''}`;
+      return res.status(409).json({ success: false, message });
+    }
+    // Cast errors (e.g., invalid dates)
+    if (error.name === 'CastError') {
+      return res.status(422).json({ success: false, message: 'Validation failed', errors: [{ path: error.path || 'unknown', message: error.message }] });
     }
     if (error.name === 'ValidationError') {
       // Extract detailed field-level validation errors
@@ -512,15 +536,42 @@ router.put('/students/:id', authenticateToken, requireRole(['admin']), async (re
 // @route   DELETE /api/admin/students/:id
 // @desc    Delete student
 // @access  Private (Admin only)
-router.delete('/students/:id', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Delete student endpoint - To be implemented',
-    data: {
-      endpoint: 'DELETE /api/admin/students/:id',
-      student_id: req.params.id
+router.delete('/students/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const { hard } = req.query;
+    const studentId = req.params.id;
+
+    const student = await Student.findById(studentId);
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student not found' });
     }
-  });
+
+    const userId = student.user;
+
+    if (hard === 'true') {
+      await Promise.all([
+        Student.deleteOne({ _id: studentId }),
+        userId ? User.deleteOne({ _id: userId }) : Promise.resolve(),
+        Attendance.deleteMany({ student: studentId }),
+        Grade.deleteMany({ student: studentId }),
+        FeePayment.deleteMany({ student: studentId }),
+        FeeDue.deleteMany({ student: studentId })
+      ]);
+
+      return res.json({ success: true, message: 'Student permanently deleted' });
+    }
+
+    student.status = 'inactive';
+    await student.save();
+    if (userId) {
+      await User.updateOne({ _id: userId }, { $set: { status: 'inactive' } });
+    }
+
+    res.json({ success: true, message: 'Student deactivated (soft delete)', data: { id: studentId, status: 'inactive' } });
+  } catch (error) {
+    console.error('Delete student error:', error);
+    res.status(500).json({ success: false, message: 'Error deleting student', error: error.message });
+  }
 });
 
 // @route   GET /api/admin/faculty
@@ -529,111 +580,66 @@ router.delete('/students/:id', (req, res) => {
 router.get('/faculty', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { page = 1, limit = 10, department, search } = req.query;
-    const skip = (page - 1) * limit;
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
 
-    // Build query
-    let query = {};
-    
-    // Add department filter if provided
+    const query = {};
     if (department && department !== 'all') {
       query.department = department;
     }
 
-    // Add search functionality
-    let userQuery = {};
-    if (search) {
-      userQuery = {
-        $or: [
-          { firstName: { $regex: search, $options: 'i' } },
-          { lastName: { $regex: search, $options: 'i' } },
-          { email: { $regex: search, $options: 'i' } }
-        ]
-      };
-    }
+    const searchRegex = search ? new RegExp(search, 'i') : null;
 
-    // Get faculty with user details
+    const baseMatch = {
+      'userDetails.role': 'faculty',
+      'userDetails.status': 'active',
+      status: 'active',
+      ...query,
+      ...(searchRegex ? {
+        $or: [
+          { 'userDetails.firstName': searchRegex },
+          { 'userDetails.lastName': searchRegex },
+          { 'userDetails.email': searchRegex },
+          { employeeId: searchRegex }
+        ]
+      } : {})
+    };
+
     const facultyAggregation = [
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'user',
-          foreignField: '_id',
-          as: 'userDetails'
-        }
-      },
-      {
-        $unwind: '$userDetails'
-      },
-      {
-        $match: {
-          'userDetails.role': 'faculty',
-          ...query,
-          ...(search ? {
-            $or: [
-              { 'userDetails.firstName': { $regex: search, $options: 'i' } },
-              { 'userDetails.lastName': { $regex: search, $options: 'i' } },
-              { 'userDetails.email': { $regex: search, $options: 'i' } },
-              { employeeId: { $regex: search, $options: 'i' } }
-            ]
-          } : {})
-        }
-      },
-      {
-        $project: {
-          employeeId: 1,
-          department: 1,
-          designation: 1,
-          subjects: 1,
-          joiningDate: 1,
-          status: 1,
-          'userDetails.firstName': 1,
-          'userDetails.lastName': 1,
-          'userDetails.email': 1,
-          'userDetails.phone': 1,
-          'userDetails.status': 1
-        }
-      },
+      { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'userDetails' } },
+      { $unwind: '$userDetails' },
+      { $match: baseMatch },
+      { $project: {
+        employeeId: 1,
+        department: 1,
+        designation: 1,
+        subjects: 1,
+        joiningDate: 1,
+        status: 1,
+        'userDetails.firstName': 1,
+        'userDetails.lastName': 1,
+        'userDetails.email': 1,
+        'userDetails.phone': 1,
+        'userDetails.status': 1
+      } },
       { $sort: { 'userDetails.firstName': 1 } },
       { $skip: skip },
-      { $limit: parseInt(limit) }
+      { $limit: limitNum }
     ];
 
     const faculty = await Faculty.aggregate(facultyAggregation);
-    
-    // Get total count for pagination
+
     const totalCountAggregation = [
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'user',
-          foreignField: '_id',
-          as: 'userDetails'
-        }
-      },
-      {
-        $unwind: '$userDetails'
-      },
-      {
-        $match: {
-          'userDetails.role': 'faculty',
-          ...query,
-          ...(search ? {
-            $or: [
-              { 'userDetails.firstName': { $regex: search, $options: 'i' } },
-              { 'userDetails.lastName': { $regex: search, $options: 'i' } },
-              { 'userDetails.email': { $regex: search, $options: 'i' } },
-              { employeeId: { $regex: search, $options: 'i' } }
-            ]
-          } : {})
-        }
-      },
+      { $lookup: { from: 'users', localField: 'user', foreignField: '_id', as: 'userDetails' } },
+      { $unwind: '$userDetails' },
+      { $match: baseMatch },
       { $count: 'total' }
     ];
 
     const totalResult = await Faculty.aggregate(totalCountAggregation);
     const total = totalResult.length > 0 ? totalResult[0].total : 0;
 
-    // Transform data for frontend
     const transformedFaculty = faculty.map(f => ({
       id: f._id,
       employeeId: f.employeeId,
@@ -644,34 +650,26 @@ router.get('/faculty', authenticateToken, requireRole(['admin']), async (req, re
       designation: f.designation,
       subjects: f.subjects,
       joiningDate: f.joiningDate,
-      status: f.userDetails.status === 'active' && f.status === 'active' ? 'Active' : 'Inactive'
+      status: 'Active'
     }));
 
     const pagination = {
-      currentPage: parseInt(page),
-      totalPages: Math.ceil(total / limit),
+      currentPage: pageNum,
+      totalPages: Math.max(1, Math.ceil(total / limitNum)),
       totalItems: total,
-      itemsPerPage: parseInt(limit),
-      hasNext: page < Math.ceil(total / limit),
-      hasPrev: page > 1
+      itemsPerPage: limitNum,
+      hasNext: pageNum < Math.ceil(total / limitNum),
+      hasPrev: pageNum > 1
     };
 
     res.json({
       success: true,
       message: 'Faculty data retrieved successfully',
-      data: {
-        faculty: transformedFaculty,
-        pagination
-      }
+      data: { faculty: transformedFaculty, pagination }
     });
-
   } catch (error) {
     console.error('Get faculty error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch faculty data',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch faculty data', error: error.message });
   }
 });
 
@@ -732,9 +730,8 @@ router.post('/faculty', authenticateToken, requireRole(['admin']), async (req, r
       employeeId = `FAC${String(lastNumber + 1).padStart(3, '0')}`;
     }
 
-    // Create user account
-     const defaultPassword = 'faculty123'; // Should be changed on first login
-     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    // Create user account: prefer provided password; fallback to Employee ID
+    const defaultPassword = (typeof req.body.password === 'string' && req.body.password.trim()) ? req.body.password.trim() : employeeId;
 
     // Normalize address into expected object shape
     const normalizedAddress = (address && typeof address === 'object')
@@ -745,7 +742,7 @@ router.post('/faculty', authenticateToken, requireRole(['admin']), async (req, r
       firstName,
       lastName,
       email,
-      password: hashedPassword,
+      password: defaultPassword, // Will be hashed by User pre-save hook
       role: 'faculty',
       phone,
       address: normalizedAddress,
@@ -982,36 +979,32 @@ router.put('/faculty/:id', authenticateToken, requireRole(['admin']), async (req
 router.delete('/faculty/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const { id } = req.params;
+    const { hard } = req.query;
 
-    // Find faculty member
     const faculty = await Faculty.findById(id).populate('user');
     if (!faculty) {
-      return res.status(404).json({
-        success: false,
-        message: 'Faculty member not found'
-      });
+      return res.status(404).json({ success: false, message: 'Faculty member not found' });
     }
 
-    // Instead of deleting, mark as inactive (soft delete)
-    faculty.status = 'Inactive';
+    if (hard === 'true') {
+      const userId = faculty.user?._id;
+      await Faculty.deleteOne({ _id: id });
+      if (userId) await User.deleteOne({ _id: userId });
+      return res.json({ success: true, message: 'Faculty member permanently deleted' });
+    }
+
+    faculty.status = 'inactive';
     await faculty.save();
 
-    // Optionally, you can also deactivate the user account
-    faculty.user.isActive = false;
-    await faculty.user.save();
+    if (faculty.user) {
+      faculty.user.status = 'inactive';
+      await faculty.user.save();
+    }
 
-    res.json({
-      success: true,
-      message: 'Faculty member deactivated successfully'
-    });
-
+    res.json({ success: true, message: 'Faculty member deactivated (soft delete)' });
   } catch (error) {
     console.error('Error deleting faculty:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to delete faculty member',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to delete faculty member', error: error.message });
   }
 });
 
@@ -1576,8 +1569,8 @@ router.post('/fees/structure', authenticateToken, requireRole(['admin']), async 
 
 // @route   POST /api/admin/grades
 // @desc    Create a grade record
-// @access  Private (Admin and Faculty)
-router.post('/grades', authenticateToken, requireRole(['admin', 'faculty']), async (req, res) => {
+// @access  Private (Admin only)
+router.post('/grades', authenticateToken, requireRole(['admin']), async (req, res) => {
   try {
     const {
       student,

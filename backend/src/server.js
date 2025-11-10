@@ -43,16 +43,28 @@ app.use('/api/', (req, res, next) => {
 });
 
 // CORS configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://localhost:5175',
-    process.env.FRONTEND_URL
-  ].filter(Boolean),
-  credentials: true
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl) and allowed dev origins
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('CORS: Origin not allowed'));
+  },
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Accept'],
 }));
+
+// Preflight requests are handled by the CORS middleware above; no explicit wildcard route
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -62,6 +74,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Enable by setting ENABLE_CSRF=true and include `x-csrf-token` header on unsafe methods
 // In E2E mode, skip CSRF checks for `/api/e2e/*` routes to allow test helpers
 app.use((req, res, next) => {
+  // Skip CSRF check for preflight requests
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
   if (process.env.E2E_MODE === 'true' && req.path.startsWith('/api/e2e')) {
     return next();
   }
@@ -89,7 +105,6 @@ app.get('/health', (req, res) => {
   app.use('/api/general', require('./routes/general'));
   // Newly mounted domain routers
   app.use('/api/subjects', require('./routes/subjects'));
-  app.use('/api/courses', require('./routes/courses'));
   app.use('/api/calendar', require('./routes/calendar'));
   app.use('/api/transport', require('./routes/transport'));
   app.use('/api/payments', require('./routes/payments'));
@@ -131,9 +146,9 @@ app.use((err, req, res, next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 BBD School Backend Server running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`BBD School Backend Server running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 module.exports = app;

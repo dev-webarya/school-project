@@ -208,17 +208,38 @@ router.post('/assignments/:id/submit', (req, res) => {
 });
 
 // @route   GET /api/student/grades
-// @desc    Get student grades
+// @desc    Get published grades for the logged-in student
 // @access  Private (Student only)
-router.get('/grades', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get grades endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/student/grades',
-      query_params: ['subject', 'term', 'year']
+router.get('/grades', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const Student = require('../models/Student');
+    const Grade = require('../models/Grade');
+
+    const studentDoc = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!studentDoc) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
     }
-  });
+
+    const grades = await Grade.find({ student: studentDoc._id, isPublished: true })
+      .populate('course', 'name courseCode credits')
+      .sort({ assessmentDate: -1 })
+      .limit(200);
+
+    const data = grades.map(g => ({
+      subject: g.course?.name || 'Unknown',
+      assessment: g.assessmentName,
+      marks: g.obtainedMarks,
+      totalMarks: g.maxMarks,
+      grade: g.letterGrade,
+      remarks: g.remarks,
+      date: g.assessmentDate
+    }));
+
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Student grades error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch grades', error: error.message });
+  }
 });
 
 // @route   GET /api/student/attendance

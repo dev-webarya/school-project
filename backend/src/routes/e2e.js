@@ -270,26 +270,6 @@ router.put('/subjects/:id', e2eAuthenticateToken, requireRole(['admin', 'faculty
   res.json({ success: true, data: state.subjects[idx] });
 });
 
-router.get('/courses', e2eAuthenticateToken, requireRole(['admin', 'faculty']), (req, res) => {
-  res.json({ success: true, data: state.courses });
-});
-
-router.post('/courses', e2eAuthenticateToken, requireRole(['admin']), (req, res) => {
-  const { name, code, description, department, credits = 0 } = req.body || {};
-  if (!name || !code) return res.status(400).json({ success: false, message: 'Missing required course fields' });
-  const id = `crs${state.ids.courses++}`;
-  const course = { _id: id, name, code, description, department, credits: Number(credits) };
-  state.courses.push(course);
-  res.status(201).json({ success: true, data: course });
-});
-
-router.put('/courses/:id', e2eAuthenticateToken, requireRole(['admin']), (req, res) => {
-  const { id } = req.params;
-  const idx = state.courses.findIndex(c => c._id === id);
-  if (idx === -1) return res.status(404).json({ success: false, message: 'Course not found' });
-  state.courses[idx] = { ...state.courses[idx], ...req.body };
-  res.json({ success: true, data: state.courses[idx] });
-});
 
 // -----------------------------
 // Fees: structures & dues

@@ -126,26 +126,6 @@ router.get('/semesters', async (req, res) => {
   }
 });
 
-// Get public courses (basic info only)
-router.get('/courses/public', async (req, res) => {
-  try {
-    const courses = await Course.find({ isActive: true })
-      .select('name code description department duration')
-      .sort({ name: 1 });
-
-    res.json({
-      success: true,
-      data: courses
-    });
-  } catch (error) {
-    console.error('Error fetching public courses:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching courses',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
 
 // Get public subjects (basic info only)
 router.get('/subjects/public', async (req, res) => {
@@ -450,8 +430,7 @@ router.get('/docs', (req, res) => {
           '/api/general/stats': 'GET - System statistics',
           '/api/general/school-info': 'GET - School information',
           '/api/general/departments': 'GET - Available departments',
-          '/api/general/sessions': 'GET - Available sessions',
-          '/api/general/courses/public': 'GET - Public courses',
+        '/api/general/sessions': 'GET - Available sessions',
           '/api/general/subjects/public': 'GET - Public subjects',
           '/api/general/search': 'GET - Search functionality'
         },
