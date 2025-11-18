@@ -10,6 +10,9 @@ export default function FacultyDashboard() {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [session, setSession] = useState('1');
+  const REFRESH_MS = 30000; // 30 seconds
 
   useEffect(() => {
     fetchDashboardData();
@@ -18,10 +21,11 @@ export default function FacultyDashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await facultyAPI.getDashboard();
+      const response = await facultyAPI.getDashboard({ session });
       const data = response.data;
       if (data?.success) {
         setDashboardData(data.data);
+        setLastUpdated(new Date());
         setError(null);
       } else {
         setError(data?.message || 'Failed to fetch dashboard data');
@@ -36,6 +40,14 @@ export default function FacultyDashboard() {
       setLoading(false);
     }
   };
+
+  // Auto-refresh polling
+  useEffect(() => {
+    const timer = setInterval(() => {
+      fetchDashboardData();
+    }, REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [session]);
 
   if (loading) {
     return (
@@ -59,18 +71,35 @@ export default function FacultyDashboard() {
   }
 
   const stats = [
-    { title: 'Classes Today', value: dashboardData?.stats?.classesToday || 0, icon: <FaChalkboardTeacher />, color: '#1a237e' },
-    { title: 'Active Courses', value: dashboardData?.stats?.activeCourses || 0, icon: <FaClipboardList />, color: '#0d1757' },
+    { title: 'Classes Today', value: dashboardData?.stats?.classesToday || 0, icon: <FaChalkboardTeacher />, color: '#1a237e', to: '/faculty/attendance' },
+    { title: 'Active Courses', value: dashboardData?.stats?.activeCourses || 0, icon: <FaClipboardList />, color: '#0d1757', to: '/faculty/courses' },
     { title: 'Total Students', value: dashboardData?.stats?.totalStudents || 0, icon: <FaUsers />, color: '#3f51b5' },
-    { title: 'Assignments', value: dashboardData?.stats?.totalAssignments || 0, icon: <FaTasks />, color: '#2e7d32' },
+    { title: 'Assignments', value: dashboardData?.stats?.totalAssignments || 0, icon: <FaTasks />, color: '#2e7d32', to: '/faculty/assignments' },
   ];
 
-  const upcoming = dashboardData?.upcomingClasses || [];
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
-      <h1>Faculty Dashboard</h1>
-      <p>Overview of your teaching schedule and activity.</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1>Faculty Dashboard</h1>
+          <p>Overview of your teaching schedule and activity.</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: '#666' }}>Session</span>
+            <select value={session} onChange={(e) => setSession(e.target.value)} style={{ padding: '6px 8px' }}>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+          <span style={{ fontSize: '0.85rem', color: '#666' }}>
+            Last updated: {lastUpdated ? lastUpdated.toLocaleTimeString() : '—'}
+          </span>
+          <button onClick={fetchDashboardData} style={{ padding: '8px 12px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: 6, cursor: 'pointer' }}>Refresh</button>
+        </div>
+      </div>
 
       {/* Welcome header with actual faculty details */}
       <div style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', marginTop: '12px' }}>
@@ -89,35 +118,27 @@ export default function FacultyDashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '20px', marginTop: '20px' }}>
-        {stats.map((s, i) => (
-          <div key={i} style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: 48, height: 48, borderRadius: '50%', background: s.color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem' }}>
-              {s.icon}
+        {stats.map((s, i) => {
+          const card = (
+            <div key={i} style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: '12px', cursor: s.to ? 'pointer' : 'default' }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', background: s.color, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.3rem' }}>
+                {s.icon}
+              </div>
+              <div>
+                <h3 style={{ margin: 0 }}>{s.value}</h3>
+                <p style={{ margin: 0, color: '#666' }}>{s.title}</p>
+              </div>
             </div>
-            <div>
-              <h3 style={{ margin: 0 }}>{s.value}</h3>
-              <p style={{ margin: 0, color: '#666' }}>{s.title}</p>
-            </div>
-          </div>
-        ))}
+          );
+          return s.to ? (
+            <Link key={i} to={s.to} style={{ textDecoration: 'none' }}>
+              {card}
+            </Link>
+          ) : card;
+        })}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '30px' }}>
-        <div style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>Upcoming Classes</h2>
-          <div>
-            {upcoming.length > 0 ? upcoming.map(item => (
-              <div key={item.id} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#1a237e', fontWeight: 600 }}>{item.time}</span>
-                <span>{item.course}</span>
-                <span style={{ color: '#888' }}>{item.room}</span>
-              </div>
-            )) : (
-              <p style={{ color: '#888', textAlign: 'center', padding: '20px 0' }}>No upcoming classes today</p>
-            )}
-          </div>
-        </div>
-
+      <div style={{ marginTop: '30px' }}>
         <div style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
           <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>Recent Activities</h2>
           <div>
@@ -187,6 +208,46 @@ export default function FacultyDashboard() {
               <div>
                 <h3 style={{ margin: 0, color: '#1a237e' }}>Online Classes</h3>
                 <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>Create & manage virtual classes</p>
+              </div>
+            </div>
+          </Link>
+          <Link to="/faculty/teaching-assignments" style={{ textDecoration: 'none' }}>
+            <div style={{ 
+              background: 'white', 
+              borderRadius: '8px', 
+              padding: '20px', 
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '15px',
+              cursor: 'pointer',
+              transition: 'transform 0.2s',
+              border: '2px solid transparent'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.borderColor = '#1a237e';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.borderColor = 'transparent';
+            }}>
+              <div style={{ 
+                width: 50, 
+                height: 50, 
+                borderRadius: '50%', 
+                background: '#2e7d32', 
+                color: 'white', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                fontSize: '1.3rem' 
+              }}>
+                <FaTasks />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, color: '#1a237e' }}>Teaching Assignments</h3>
+                <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>View admin-assigned responsibilities</p>
               </div>
             </div>
           </Link>

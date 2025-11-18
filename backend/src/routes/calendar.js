@@ -128,6 +128,23 @@ router.post('/', [
     await event.save();
     
     await event.populate('createdBy', 'firstName lastName');
+
+    try {
+      const { Notice } = require('../models');
+      const start = new Date(event.startDate);
+      const end = new Date(event.endDate);
+      const dateRange = start.toLocaleDateString('en-IN') + (end && end.getTime() !== start.getTime() ? ` - ${end.toLocaleDateString('en-IN')}` : '');
+      const audience = Array.isArray(event.targetAudience) ? event.targetAudience.join(', ') : 'All';
+      await Notice.create({
+        title: `Calendar: ${event.title}`,
+        description: `${event.eventType} | ${dateRange}${event.location ? ` | ${event.location}` : ''} | Audience: ${audience}`,
+        category: 'AcademicCalendar',
+        effectiveDate: event.startDate,
+        priority: (event.priority || 'Medium').toLowerCase(),
+        isActive: true,
+        createdBy: req.user.id
+      });
+    } catch (_) { void 0; }
     
     res.status(201).json({
       success: true,

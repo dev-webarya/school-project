@@ -8,6 +8,7 @@ const Navbar = () => {
   const [isLoginDropdownOpen, setIsLoginDropdownOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState(null);
   const loginDropdownRef = useRef(null);
+  const closeTimeoutRef = useRef(null);
 
   const toggleMenu = () => {
     setIsOpen(!isOpen);
@@ -20,8 +21,13 @@ const Navbar = () => {
   };
 
   const toggleLoginDropdown = () => {
-    setIsLoginDropdownOpen(!isLoginDropdownOpen);
-    if (!isLoginDropdownOpen) {
+    const next = !isLoginDropdownOpen;
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    setIsLoginDropdownOpen(next);
+    if (!next) {
       setActiveSubmenu(null);
     }
   };
@@ -34,6 +40,10 @@ const Navbar = () => {
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (loginDropdownRef.current && !loginDropdownRef.current.contains(event.target)) {
+        if (closeTimeoutRef.current) {
+          clearTimeout(closeTimeoutRef.current);
+          closeTimeoutRef.current = null;
+        }
         setIsLoginDropdownOpen(false);
         setActiveSubmenu(null);
       }
@@ -41,6 +51,10 @@ const Navbar = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+        closeTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -119,8 +133,8 @@ const Navbar = () => {
               <div 
                 className="login-dropdown" 
                 ref={loginDropdownRef}
-                onMouseEnter={() => setIsLoginDropdownOpen(true)}
-                onMouseLeave={() => setIsLoginDropdownOpen(false)}
+                onMouseEnter={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); closeTimeoutRef.current = null; } setIsLoginDropdownOpen(true); }}
+                onMouseLeave={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); } closeTimeoutRef.current = setTimeout(() => { setIsLoginDropdownOpen(false); setActiveSubmenu(null); }, 5000); }}
               >
                 <button className={`login-button ${isLoginDropdownOpen ? 'open' : ''}`} onClick={toggleLoginDropdown} aria-haspopup="true" aria-expanded={isLoginDropdownOpen}>
                   Login <FaCaretDown />

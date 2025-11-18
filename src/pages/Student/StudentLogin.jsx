@@ -55,6 +55,9 @@ const StudentLogin = () => {
       }
     } catch (err) {
       console.error('Login error:', err);
+      // Display error to user
+      const errorMessage = err.response?.data?.message || err.message || 'Login failed. Please check your credentials.';
+      showError(errorMessage);
     } finally {
       setIsLogging(false);
     }
@@ -85,7 +88,15 @@ const StudentLogin = () => {
     try {
       setIsLogging(true);
       const resp = await authAPI.forgotPassword({ email: resetEmail });
-      showSuccess(resp?.data?.message || 'OTP sent to your email');
+      const message = resp?.data?.message || 'OTP sent to your email';
+      showSuccess(message);
+      if (resp?.data?.preview) {
+        showSuccess(`Dev email preview: ${resp.data.preview}`);
+        try { window.open(resp.data.preview, '_blank', 'noopener,noreferrer'); } catch (e) { console.log('Preview open failed'); }
+      }
+      if (resp?.data?.debugOtp) {
+        showSuccess(`Dev OTP: ${resp.data.debugOtp}`);
+      }
       setResetStep(2);
     } catch (err) {
       showError(err.userMessage || err.response?.data?.message || 'Failed to send OTP');

@@ -13,11 +13,13 @@ import {
   FaClock,
   FaUserCheck,
   FaGraduationCap as FaStudentEnrollment,
-  FaChartBar
+  FaChartBar,
+  FaSyncAlt
 } from 'react-icons/fa';
 import { useAuth } from '../../contexts/AuthContext';
 import './AdminDashboard.css';
-import { adminAPI } from '../../services/api.js';
+import api, { adminAPI } from '../../services/api.js';
+import config from '../../config/config.js';
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -33,6 +35,7 @@ export default function AdminDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [waitlistedCount, setWaitlistedCount] = useState(0);
 
   useEffect(() => {
     fetchDashboardData();
@@ -45,10 +48,63 @@ export default function AdminDashboard() {
       const data = response.data;
 
       if (data.success) {
-        setDashboardData(data.data);
+        let mergedData = data.data;
+        // Merge E2E messages only when E2E mode is enabled
+        if (config.IS_E2E) {
+          try {
+            const msgRes = await api.get('/e2e/messages');
+            const messages = Array.isArray(msgRes?.data?.data)
+              ? msgRes.data.data
+              : (Array.isArray(msgRes?.data) ? msgRes.data : []);
+            const msgNotifs = (messages || []).slice(0, 5).map((m) => ({
+              id: m._id,
+              type: 'system',
+              message: `${m.name} sent a message: ${m.subject}`,
+              time: new Date(m.time).toLocaleString()
+            }));
+            mergedData = {
+              ...mergedData,
+              recentNotifications: [...msgNotifs, ...(mergedData.recentNotifications || [])].slice(0, 10)
+            };
+          } catch (msgErr) {
+            console.warn('E2E messages fetch failed:', msgErr);
+          }
+        }
+
+        setDashboardData(mergedData);
         setError('');
       } else {
         setError(data.message || 'Failed to fetch dashboard data');
+      }
+
+      const fromDashboard = data?.data?.stats?.waitlistedCount;
+      if (typeof fromDashboard === 'number') {
+        setWaitlistedCount(fromDashboard);
+      } else {
+        // Admissions count: prefer E2E store, fall back to real DB
+        try {
+          if (config.IS_E2E) {
+            const admRes = await api.get('/e2e/admissions');
+            const admissionsData = Array.isArray(admRes?.data?.data)
+              ? admRes.data.data
+              : (Array.isArray(admRes?.data) ? admRes.data : []);
+            const e2eCount = (admissionsData || []).filter(a => a.status === 'submitted').length;
+            if (e2eCount > 0) {
+              setWaitlistedCount(e2eCount);
+            } else {
+              const dbRes = await adminAPI.getAdmissions({ params: { status: 'submitted', limit: 1 } });
+              const total = dbRes?.data?.data?.pagination?.totalCount || 0;
+              setWaitlistedCount(total);
+            }
+          } else {
+            const dbRes = await adminAPI.getAdmissions({ params: { status: 'submitted', limit: 1 } });
+            const total = dbRes?.data?.data?.pagination?.totalCount || 0;
+            setWaitlistedCount(total);
+          }
+        } catch (admErr) {
+          console.warn('Admissions count fetch failed:', admErr);
+          setWaitlistedCount(0);
+        }
       }
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -114,14 +170,28 @@ export default function AdminDashboard() {
             <p>Monthly Revenue</p>
           </div>
         </div>
+
+        {/* E2E Waitlisted count (online applications) */}
+        <div className="stat-card">
+          <div className="stat-icon courses">
+            <FaBell />
+          </div>
+          <div className="stat-content">
+            <h3>{waitlistedCount}</h3>
+            <p>Waitlisted Students</p>
+          </div>
+        </div>
       </div>
 
       {/* Dashboard Content Grid */}
       <div className="dashboard-content">
         {/* Recent Notifications */}
         <div className="dashboard-card">
-          <div className="card-header">
+          <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3><FaBell /> Recent Notifications</h3>
+            <button className="action-btn" onClick={fetchDashboardData} title="Refresh notifications">
+              <FaSyncAlt /> Refresh
+            </button>
           </div>
           <div className="card-content">
             {dashboardData.recentNotifications.length > 0 ? (

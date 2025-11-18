@@ -37,9 +37,9 @@ class ErrorBoundary extends React.Component {
           <details style={{ whiteSpace: 'pre-wrap', marginTop: '10px' }}>
             <summary>Error Details (Click to expand)</summary>
             <div style={{ marginTop: '10px', fontSize: '12px', fontFamily: 'monospace' }}>
-              <strong>Error:</strong> {this.state.error && this.state.error.toString()}
+              <strong>Error:</strong> {this.state.error ? this.state.error.toString() : 'Unknown error'}
               <br />
-              <strong>Stack Trace:</strong> {this.state.errorInfo.componentStack}
+              <strong>Stack Trace:</strong> {this.state.errorInfo?.componentStack || 'No stack trace available'}
             </div>
           </details>
           <button 

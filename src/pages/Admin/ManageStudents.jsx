@@ -135,6 +135,10 @@ export default function ManageStudents() {
     }
   };
 
+  const confirmDeleteStudent = async (studentId) => {
+    return handleDelete(studentId);
+  };
+
   const handleRefresh = () => {
     withLoading(() => fetchStudents(currentPage, searchTerm));
   };
@@ -307,7 +311,7 @@ export default function ManageStudents() {
       {!loading && !error && totalPages > 1 && (
         <div className="pagination">
           <LoadingButton
-            onClick={() => executeWithLoading(() => fetchStudents(currentPage - 1, searchTerm))}
+            onClick={() => withLoading(() => fetchStudents(currentPage - 1, searchTerm))}
             disabled={currentPage === 1}
             loading={loading}
             size="small"
@@ -324,7 +328,7 @@ export default function ManageStudents() {
           </div>
           
           <LoadingButton
-            onClick={() => executeWithLoading(() => fetchStudents(currentPage + 1, searchTerm))}
+            onClick={() => withLoading(() => fetchStudents(currentPage + 1, searchTerm))}
             disabled={currentPage === totalPages}
             loading={loading}
             size="small"

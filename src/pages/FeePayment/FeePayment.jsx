@@ -1,27 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FaDownload, FaCreditCard, FaUniversity, FaMoneyBillWave, FaQrcode, FaCheck } from 'react-icons/fa';
 import './FeePayment.css';
 
 // Add jsPDF import
 import jsPDF from 'jspdf';
+import { studentAPI } from '../../services/api.js';
 
 const FeePayment = () => {
   const [activeTab, setActiveTab] = useState('card');
   const [studentInfo, setStudentInfo] = useState({
     studentId: 'Student ID',
     studentName: 'Student Name',
-    class: 'Class',
-    feeAmount: 'Fee Amount'
+    class: '',
+    feeAmount: ''
   });
   const [paymentComplete, setPaymentComplete] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
+  const [feeStructures, setFeeStructures] = useState([]);
+  const [loadingFees, setLoadingFees] = useState(false);
+  const [feesError, setFeesError] = useState('');
+
+  const toModelClass = (value) => {
+    if (value === 'NS') return 'Nursery';
+    return value; // LKG, UKG, numeric strings already match
+  };
+
+  useEffect(() => {
+    const fetchFeeStructures = async () => {
+      try {
+        setLoadingFees(true);
+        const res = await studentAPI.getFeeStructures();
+        const list = res.data?.data || [];
+        setFeeStructures(list);
+      } catch (err) {
+        setFeesError(err.userMessage || 'Failed to load fee structures');
+      } finally {
+        setLoadingFees(false);
+      }
+    };
+    fetchFeeStructures();
+  }, []);
 
   const handleStudentInfoChange = (e) => {
     const { name, value } = e.target;
-    setStudentInfo(prevState => ({
-      ...prevState,
-      [name]: value
-    }));
+    setStudentInfo(prevState => {
+      const next = { ...prevState, [name]: value };
+      if (name === 'class') {
+        const modelClass = toModelClass(value);
+        const match = feeStructures.find(fs => String(fs.class) === String(modelClass));
+        if (match) {
+          next.feeAmount = String(match.totalAmount);
+        }
+      }
+      return next;
+    });
   };
 
   const handlePayment = (e) => {
@@ -171,39 +203,38 @@ const FeePayment = () => {
                 <h2>Fee Payment Information</h2>
                 <p>Please enter the student details and select a payment method to proceed with the fee payment.</p>
                 
-                <div className="fee-structure">
-                  <h3>Fee Structure</h3>
+              <div className="fee-structure">
+                <h3>Fee Structure</h3>
+                {loadingFees ? (
+                  <p>Loading fee structures...</p>
+                ) : feesError ? (
+                  <p className="error">{feesError}</p>
+                ) : (
                   <table className="fee-table">
                     <thead>
                       <tr>
                         <th>Class</th>
-                        <th>Annual Fee</th>
+                        <th>Total Fee</th>
+                        <th>Schedule</th>
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
-                        <td>Nursery - KG</td>
-                        <td>₹45,000</td>
-                      </tr>
-                      <tr>
-                        <td>Grade 1-5</td>
-                        <td>₹54,000</td>
-                      </tr>
-                      <tr>
-                        <td>Grade 6-8</td>
-                        <td>₹66,000</td>
-                      </tr>
-                      <tr>
-                        <td>Grade 9-10</td>
-                        <td>₹75,000</td>
-                      </tr>
-                      <tr>
-                        <td>Grade 11-12</td>
-                        <td>₹90,000</td>
-                      </tr>
+                      {feeStructures.map((fs) => (
+                        <tr key={fs._id}>
+                          <td>{fs.class}</td>
+                          <td>₹{fs.totalAmount}</td>
+                          <td>{String(fs.paymentSchedule).replace('_', ' ')}</td>
+                        </tr>
+                      ))}
+                      {feeStructures.length === 0 && (
+                        <tr>
+                          <td colSpan={3}>No fee structures available.</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
-                </div>
+                )}
+              </div>
               </div>
               
               <div className="payment-form-container">
@@ -248,11 +279,11 @@ const FeePayment = () => {
                           required
                         >
                           <option value="">Select Class</option>
-                          <option value="Nursery">Nursery</option>
+                          <option value="NS">NS</option>
                           <option value="LKG">LKG</option>
                           <option value="UKG">UKG</option>
                           {[...Array(12)].map((_, i) => (
-                            <option key={i} value={`Grade ${i+1}`}>Grade {i+1}</option>
+                            <option key={i} value={`${i+1}`}>{i+1}</option>
                           ))}
                         </select>
                       </div>

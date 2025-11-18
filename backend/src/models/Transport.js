@@ -50,6 +50,12 @@ const routeSchema = new mongoose.Schema({
     type: Number, // in minutes
     required: true
   },
+  baseFare: {
+    type: Number,
+    required: true,
+    min: 0,
+    default: 0
+  },
   isActive: {
     type: Boolean,
     default: true

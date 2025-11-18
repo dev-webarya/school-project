@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLoading } from '../../hooks/useLoading';
 import { useNotification } from '../../hooks/useNotification';
-import { adminAPI, subjectAPI, studentAPI } from '../../services/api.js';
+import { adminAPI, subjectAPI } from '../../services/api.js';
 import './FacultyAssignment.css';
 
 const FacultyAssignment = () => {
@@ -18,10 +18,7 @@ const FacultyAssignment = () => {
   const [viewMode, setViewMode] = useState('assignments'); // 'assignments', 'faculty', 'courses'
 
   const [formData, setFormData] = useState({
-    facultyId: '',
-    courseId: '',
-    classId: '',
-    session: '',
+    employeeId: '',
     academicYear: '',
     assignmentType: 'primary', // primary, secondary, substitute
     startDate: '',
@@ -50,17 +47,30 @@ const FacultyAssignment = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [facultyRes, subjectsRes, classesRes, assignmentsRes] = await Promise.all([
-        adminAPI.getFaculty({ retry: true }),
-        subjectAPI.getSubjects({ retry: true }),
-        studentAPI.getClasses({ retry: true }),
+      const [facultyRes, subjectsRes, schedulesRes, assignmentsRes] = await Promise.all([
+        adminAPI.getFaculty({ retry: true, params: { page: 1, limit: 100 } }),
+        subjectAPI.getSubjects({ retry: true, params: { page: 1, limit: 100 } }),
+        adminAPI.getSchedules({ retry: true }),
         adminAPI.getAssignments({ retry: true })
       ]);
 
-      const facultyData = facultyRes.data?.data || facultyRes.data || [];
-      const coursesData = subjectsRes.data?.data || subjectsRes.data || [];
-      const classesData = classesRes.data?.data || classesRes.data || [];
-      const assignmentsData = assignmentsRes.data?.data || assignmentsRes.data || [];
+      // Extract arrays from varied response shapes
+      const facultyData = facultyRes.data?.data?.faculty 
+        || facultyRes.data?.faculty 
+        || facultyRes.data?.data 
+        || facultyRes.data 
+        || [];
+      const coursesData = subjectsRes.data?.data?.subjects 
+        || subjectsRes.data?.subjects 
+        || subjectsRes.data?.data 
+        || subjectsRes.data 
+        || [];
+      const scheduleItems = schedulesRes.data?.data 
+        || schedulesRes.data 
+        || [];
+      const assignmentsData = assignmentsRes.data?.data 
+        || assignmentsRes.data 
+        || [];
 
       // Normalize for local usage
       const normalizedFaculty = (facultyData || []).map(f => ({
@@ -70,7 +80,8 @@ const FacultyAssignment = () => {
         department: f.department,
         designation: f.designation,
         specialization: f.specialization || '',
-        maxWorkload: f.maxWorkload || 16
+        maxWorkload: f.maxWorkload || 16,
+        employeeId: f.employeeId || f.employeeID || f.empId || f.employeeCode || ''
       }));
 
       const normalizedCourses = (coursesData || []).map(c => ({
@@ -81,11 +92,15 @@ const FacultyAssignment = () => {
         credits: c.credits || 0
       }));
 
-      const normalizedClasses = (classesData || []).map(cl => ({
-        id: cl._id || cl.id,
-        name: cl.name || `${cl.class || ''} ${cl.section || ''}`.trim(),
-        section: cl.section || '',
-        grade: cl.grade || cl.class || ''
+      // Build unique classes from schedules (admin-accessible)
+      const classNameSet = new Set(
+        (scheduleItems || [])
+          .map(it => it.className)
+          .filter(Boolean)
+      );
+      const normalizedClasses = Array.from(classNameSet).map(name => ({
+        id: name,
+        name
       }));
 
       const normalizedAssignments = (assignmentsData || []).map(a => ({
@@ -100,9 +115,18 @@ const FacultyAssignment = () => {
         endDate: a.endDate,
         workload: a.workload || 0,
         notes: a.notes || '',
+        completed: !!a.completed,
         faculty: a.faculty || normalizedFaculty.find(f => f.id === (a.facultyId || a.faculty?._id)),
-        course: a.course || normalizedCourses.find(c => c.id === (a.courseId || a.course?._id)),
-        class: a.class || normalizedClasses.find(cl => cl.id === (a.classId || a.class?._id))
+        course: (
+          a.course 
+          || normalizedCourses.find(c => c.id === (a.courseId || a.course?._id))
+          || { id: a.courseId || 'GENERAL', code: '-', name: 'General' }
+        ),
+        class: (
+          a.class 
+          || normalizedClasses.find(cl => cl.id === (a.classId || a.class?._id))
+          || { id: a.classId || 'GENERAL', name: 'General' }
+        )
       }));
 
       setFaculty(normalizedFaculty);
@@ -133,10 +157,24 @@ const FacultyAssignment = () => {
     setLoading(true);
 
     try {
+      // Simplified: require Employee ID and resolve to faculty
+      if (!formData.employeeId) {
+        showNotification('Employee ID is required', 'error');
+        setLoading(false);
+        return;
+      }
+      const byEmployee = faculty.find(f => `${f.employeeId}` === `${formData.employeeId}`);
+      if (!byEmployee) {
+        showNotification('No faculty found for the provided Employee ID', 'error');
+        setLoading(false);
+        return;
+      }
+      const effectiveFacultyId = byEmployee.id?.toString?.() || byEmployee.id;
+      const selectedFaculty = byEmployee;
+
       // Validate workload
-      const selectedFaculty = faculty.find(f => `${f.id}` === `${formData.facultyId}`);
       const currentWorkload = assignments
-        .filter(a => `${a.facultyId}` === `${formData.facultyId}` && a.academicYear === formData.academicYear)
+        .filter(a => `${a.facultyId}` === `${effectiveFacultyId}` && a.academicYear === formData.academicYear)
         .reduce((total, a) => total + a.workload, 0);
       
       const newWorkload = editingAssignment ? 
@@ -152,14 +190,17 @@ const FacultyAssignment = () => {
         return;
       }
 
-      // Check for conflicts
+      // Simplified conflict: same faculty + academic year + overlapping dates
       const hasConflict = assignments.some(assignment => {
         if (editingAssignment && assignment.id === editingAssignment.id) return false;
-        return `${assignment.facultyId}` === `${formData.facultyId}` &&
-               `${assignment.courseId}` === `${formData.courseId}` &&
-               `${assignment.classId}` === `${formData.classId}` &&
-               `${(assignment.session ?? assignment.semester)}` === `${formData.session}` &&
-               assignment.academicYear === formData.academicYear;
+        const sameFacultyYear = `${assignment.facultyId}` === `${effectiveFacultyId}` && assignment.academicYear === formData.academicYear;
+        if (!sameFacultyYear) return false;
+        const aStart = assignment.startDate ? new Date(assignment.startDate) : null;
+        const aEnd = assignment.endDate ? new Date(assignment.endDate) : null;
+        const fStart = formData.startDate ? new Date(formData.startDate) : null;
+        const fEnd = formData.endDate ? new Date(formData.endDate) : null;
+        if (!aStart || !aEnd || !fStart || !fEnd) return false;
+        return (fStart <= aEnd && aStart <= fEnd);
       });
 
       if (hasConflict) {
@@ -169,10 +210,11 @@ const FacultyAssignment = () => {
       }
 
       const payload = {
-        facultyId: formData.facultyId,
-        courseId: formData.courseId,
-        classId: formData.classId,
-        session: formData.session,
+        employeeId: formData.employeeId || selectedFaculty?.employeeId,
+        facultyId: effectiveFacultyId,
+        courseId: 'GENERAL',
+        classId: 'GENERAL',
+        session: '1',
         academicYear: formData.academicYear,
         assignmentType: formData.assignmentType,
         startDate: formData.startDate,
@@ -184,16 +226,14 @@ const FacultyAssignment = () => {
       if (editingAssignment) {
         await adminAPI.updateAssignment(editingAssignment.id, payload);
         // Optimistically update local state
-        const selectedCourse = courses.find(c => `${c.id}` === `${formData.courseId}`);
-        const selectedClass = classes.find(c => `${c.id}` === `${formData.classId}`);
         setAssignments(prev => prev.map(assignment => 
           assignment.id === editingAssignment.id
             ? {
                 ...payload,
                 id: editingAssignment.id,
                 faculty: selectedFaculty,
-                course: selectedCourse,
-                class: selectedClass
+                course: { id: 'GENERAL', code: '-', name: 'General' },
+                class: { id: 'GENERAL', name: 'General' }
               }
             : assignment
         ));
@@ -201,14 +241,12 @@ const FacultyAssignment = () => {
       } else {
         const res = await adminAPI.createAssignment(payload);
         const created = res.data?.data || res.data || payload;
-        const selectedCourse = courses.find(c => `${c.id}` === `${created.courseId}`);
-        const selectedClass = classes.find(c => `${c.id}` === `${created.classId}`);
         const newAssignment = {
           ...created,
           id: created._id || created.id || Date.now(),
           faculty: selectedFaculty,
-          course: selectedCourse,
-          class: selectedClass
+          course: { id: 'GENERAL', code: '-', name: 'General' },
+          class: { id: 'GENERAL', name: 'General' }
         };
         setAssignments(prev => [...prev, newAssignment]);
         showNotification('Assignment created successfully', 'success');
@@ -225,10 +263,7 @@ const FacultyAssignment = () => {
   const handleEdit = (assignment) => {
     setEditingAssignment(assignment);
     setFormData({
-      facultyId: assignment.facultyId.toString(),
-      courseId: assignment.courseId.toString(),
-      classId: assignment.classId.toString(),
-      session: assignment.session ?? assignment.semester,
+      employeeId: assignment.employeeId || assignment.faculty?.employeeId || '',
       academicYear: assignment.academicYear,
       assignmentType: assignment.assignmentType,
       startDate: assignment.startDate,
@@ -254,12 +289,23 @@ const FacultyAssignment = () => {
     }
   };
 
+  const handleComplete = async (assignment) => {
+    if (assignment.completed) return; // already completed
+    setLoading(true);
+    try {
+      await adminAPI.updateAssignment(assignment.id, { completed: true });
+      setAssignments(prev => prev.map(a => a.id === assignment.id ? { ...a, completed: true } : a));
+      showNotification('Assignment marked as completed', 'success');
+    } catch (error) {
+      showNotification(error.userMessage || 'Error completing assignment', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
-      facultyId: '',
-      courseId: '',
-      classId: '',
-      session: '',
+      employeeId: '',
       academicYear: '',
       assignmentType: 'primary',
       startDate: '',
@@ -304,6 +350,9 @@ const FacultyAssignment = () => {
                   <button onClick={() => handleDelete(assignment.id)} className="btn-delete">
                     Delete
                   </button>
+                  <button onClick={() => handleComplete(assignment)} className={`btn-complete ${assignment.completed ? 'disabled' : ''}`} disabled={assignment.completed}>
+                    {assignment.completed ? 'Completed' : 'Complete'}
+                  </button>
                 </div>
               </div>
               <div className="assignment-details">
@@ -315,6 +364,9 @@ const FacultyAssignment = () => {
                 <p><strong>Type:</strong> {assignment.assignmentType}</p>
                 <p><strong>Workload:</strong> {assignment.workload} hours/week</p>
                 <p><strong>Duration:</strong> {assignment.startDate} to {assignment.endDate}</p>
+                {assignment.completed && (
+                  <p><strong>Status:</strong> Completed</p>
+                )}
                 {assignment.notes && (
                   <p><strong>Notes:</strong> {assignment.notes}</p>
                 )}
@@ -336,10 +388,14 @@ const FacultyAssignment = () => {
           return (
             <div key={member.id} className="faculty-workload-card">
               <div className="faculty-info">
-                <h3>{member.name}</h3>
-                <p><strong>Department:</strong> {member.department}</p>
-                <p><strong>Designation:</strong> {member.designation}</p>
-                <p><strong>Specialization:</strong> {member.specialization}</p>
+                <div className="faculty-fields">
+                  <p><span className="field-label">Name:-</span> <span className="field-value">{member.name}</span></p>
+                  <p><span className="field-label">Department:-</span> <span className="field-value">{member.department}</span></p>
+                  <p><span className="field-label">Designation:-</span> <span className="field-value">{member.designation}</span></p>
+                  {member.specialization && (
+                    <p><span className="field-label">Specialization:-</span> <span className="field-value">{member.specialization}</span></p>
+                  )}
+                </div>
               </div>
               <div className="workload-info">
                 <div className="workload-bar">
@@ -440,70 +496,20 @@ const FacultyAssignment = () => {
             
             <form onSubmit={handleSubmit} className="assignment-form">
               <div className="form-row">
-                <div className="form-group">
-                  <label>Faculty *</label>
-                  <select
-                    name="facultyId"
-                    value={formData.facultyId}
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label>Employee ID *</label>
+                  <input
+                    type="text"
+                    name="employeeId"
+                    value={formData.employeeId}
                     onChange={handleInputChange}
+                    placeholder="Enter Employee ID (e.g., FAC011)"
                     required
-                  >
-                    <option value="">Select Faculty</option>
-                    {faculty.map(member => (
-                      <option key={member.id} value={member.id}>
-                        {member.name} - {member.department}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Course *</label>
-                  <select
-                    name="courseId"
-                    value={formData.courseId}
-                    onChange={handleInputChange}
-                    required
-                  >
-                    <option value="">Select Course</option>
-                    {courses.map(course => (
-                      <option key={course.id} value={course.id}>
-                        {course.code} - {course.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Class *</label>
-                  <select
-                    name="classId"
-                    value={formData.classId}
-                    onChange={handleInputChange}
-                    required
-                  >
-                    <option value="">Select Class</option>
-                    {classes.map(cls => (
-                      <option key={cls.id} value={cls.id}>{cls.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-            <label>Session *</label>
-                  <select
-                    name="session"
-                    value={formData.session}
-                    onChange={handleInputChange}
-                    required
-                  >
-                    <option value="">Select Session</option>
-                    {sessions.map(sem => (
-                      <option key={sem} value={sem}>{sem}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              {/* Simplified: no faculty/course/class/session selections */}
 
               <div className="form-row">
                 <div className="form-group">

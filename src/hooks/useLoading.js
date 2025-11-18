@@ -37,12 +37,9 @@ export const useLoading = (initialState = false) => {
    * @returns {Promise} - Promise that resolves with the result of asyncFunction
    */
   const withLoading = useCallback(async (asyncFunction, message = 'Loading...') => {
+    startLoading(message);
     try {
-      startLoading(message);
-      const result = await asyncFunction();
-      return result;
-    } catch (error) {
-      throw error;
+      return await asyncFunction();
     } finally {
       stopLoading();
     }

@@ -53,13 +53,13 @@ const gradeSchema = new mongoose.Schema({
     enum: ['A+', 'A', 'B+', 'B', 'C+', 'C', 'D', 'F'],
     default: function() {
       const percentage = (this.obtainedMarks / this.maxMarks) * 100;
-      if (percentage >= 90) return 'A+';
-      if (percentage >= 80) return 'A';
-      if (percentage >= 75) return 'B+';
-      if (percentage >= 70) return 'B';
-      if (percentage >= 60) return 'C+';
+      if (percentage >= 95) return 'A+';
+      if (percentage >= 90) return 'A';
+      if (percentage >= 80) return 'B+';
+      if (percentage >= 70) return 'B+';
+      if (percentage >= 60) return 'B';
       if (percentage >= 50) return 'C';
-      if (percentage >= 35) return 'D';
+      if (percentage >= 33) return 'D';
       return 'F';
     }
   },

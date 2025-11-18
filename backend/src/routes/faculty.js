@@ -2,7 +2,34 @@ const express = require('express');
 const router = express.Router();
 const { authenticateToken, requireRole } = require('../middleware/auth');
 const User = require('../models/User');
+
+// Test route at the beginning
+router.get('/test-get-beginning', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    res.json({ success: true, message: 'GET works at beginning' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 const Faculty = require('../models/Faculty');
+const OnlineClass = require('../models/OnlineClass');
+const Student = require('../models/Student');
+const Course = require('../models/Course');
+const Assignment = require('../models/Assignment');
+const AssignmentSubmission = require('../models/AssignmentSubmission');
+const Attendance = require('../models/Attendance');
+const FacultyAssignment = require('../models/FacultyAssignment');
+const Schedule = require('../models/Schedule');
+
+// Test route at the very beginning
+router.patch('/test-patch-beginning', (req, res) => {
+  res.json({ success: true, message: 'PATCH works at beginning' });
+});
+
+// Test GET route
+router.get('/test-get', (req, res) => {
+  res.json({ success: true, message: 'GET works' });
+});
 
 // Helper function to get time ago
 const getTimeAgo = (date) => {
@@ -19,115 +46,173 @@ const getTimeAgo = (date) => {
 // @route   GET /api/faculty/dashboard
 // @desc    Get faculty dashboard data
 // @access  Private (Faculty only)
-// In router.get('/dashboard', ...)
 router.get('/dashboard', authenticateToken, requireRole(['faculty']), async (req, res) => {
   try {
-    // Get faculty profile (fix: use 'user' ref and populate)
-    const facultyProfile = await Faculty
-      .findOne({ user: req.user._id || req.user.id })
-      .populate('user', 'firstName lastName email phone');
+    const { session } = req.query;
+    // Get faculty profile
+    const facultyProfile = await Faculty.findOne({ user: req.user._id || req.user.id });
 
-    // Get basic stats
+    // Basic counts
     const totalStudents = await User.countDocuments({ role: 'student', status: 'active' });
-    const totalFaculty = await User.countDocuments({ role: 'faculty', status: 'active' });
-    
-    // Sample data for classes and courses (would come from actual class/course models)
-    const classesToday = 3;
-    const activeCourses = 2;
-    
-    // Sample upcoming classes (would come from actual schedule model)
-    const upcomingClasses = [
-      {
-        id: 1,
-        time: '09:00 AM',
-        course: 'Mathematics - Algebra',
-        room: 'Room 201',
-        class: '10-A',
-        subject: 'Mathematics'
-      },
-      {
-        id: 2,
-        time: '10:00 AM',
-        course: 'Physics - Motion',
-        room: 'Lab 2',
-        class: '10-A',
-        subject: 'Physics'
-      },
-      {
-        id: 3,
-        time: '11:00 AM',
-        course: 'Mathematics - Geometry',
-        room: 'Room 203',
-        class: '10-B',
-        subject: 'Mathematics'
+
+    // Compute assignments and courses by session (if provided)
+    let totalAssignments = 0;
+    let activeCourses = 0;
+    if (facultyProfile) {
+      const assignmentFilter = { facultyId: facultyProfile._id };
+      if (session) assignmentFilter.session = session;
+      const facultyAssignments = await FacultyAssignment.find(assignmentFilter).lean();
+      totalAssignments = facultyAssignments.length;
+      const distinctCourseIds = new Set(facultyAssignments.map(a => String(a.courseId)));
+      activeCourses = distinctCourseIds.size;
+    }
+
+    // Upcoming classes for today from Schedule
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const todayDay = days[new Date().getDay()];
+    let upcomingClasses = [];
+    let classesToday = 0;
+    if (facultyProfile) {
+      const schedules = await Schedule.find({ faculty: facultyProfile._id, day: todayDay })
+        .sort({ startTime: 1 })
+        .lean();
+      classesToday = schedules.length;
+      upcomingClasses = schedules.map((s, idx) => ({
+        id: idx + 1,
+        time: s.startTime,
+        course: `${s.subject || 'Subject'}${s.description ? ' - ' + s.description : ''}`,
+        room: s.room || 'N/A',
+        class: s.className || 'N/A',
+        subject: s.subject || 'N/A'
+      }));
+    }
+
+    // Recent activities from assignment submissions created via faculty-created assignments
+    let recentActivities = [];
+    try {
+      const assignments = await Assignment.find({ createdBy: facultyProfile?._id }).select('class section');
+      const assignmentIds = assignments.map(a => a._id);
+      if (assignmentIds.length) {
+        const submissions = await AssignmentSubmission
+          .find({ assignment: { $in: assignmentIds } })
+          .populate({ path: 'student', select: 'studentId rollNumber user', populate: { path: 'user', select: 'firstName lastName' } })
+          .populate('assignment', 'class section')
+          .sort({ submittedAt: -1 })
+          .limit(10);
+
+        recentActivities = submissions.map((s, idx) => ({
+          id: idx + 1,
+          type: 'assignment',
+          message: `New assignment submitted by ${
+            s.student?.user ? `${s.student.user.firstName || ''} ${s.student.user.lastName || ''}`.trim() : (s.student?.studentId || 'Student')
+          }`,
+          time: getTimeAgo(s.submittedAt),
+          class: `${s.assignment?.class || ''}${s.assignment?.section ? '-' + s.assignment.section : ''}`.trim() || 'N/A'
+        }));
       }
-    ];
-    
-    // Sample recent activities (would come from actual activity logs)
-    const recentActivities = [
-      {
-        id: 1,
-        type: 'assignment',
-        message: 'New assignment submitted by John Doe',
-        time: getTimeAgo(new Date(Date.now() - 2 * 60 * 60 * 1000)),
-        class: '10-A'
-      },
-      {
-        id: 2,
-        type: 'attendance',
-        message: 'Attendance marked for Mathematics class',
-        time: getTimeAgo(new Date(Date.now() - 4 * 60 * 60 * 1000)),
-        class: '10-B'
-      }
-    ];
+    } catch (e) {
+      console.warn('Recent activities generation error:', e.message);
+    }
+
+    // Fallback sample data if nothing available
+    if (!classesToday && upcomingClasses.length === 0) {
+      upcomingClasses = [
+        { id: 1, time: '09:00 AM', course: 'Mathematics - Algebra', room: 'Room 201', class: '10-A', subject: 'Mathematics' },
+        { id: 2, time: '10:00 AM', course: 'Physics - Motion', room: 'Lab 2', class: '10-A', subject: 'Physics' },
+        { id: 3, time: '11:00 AM', course: 'Mathematics - Geometry', room: 'Room 203', class: '10-B', subject: 'Mathematics' }
+      ];
+      classesToday = 3;
+    }
 
     const dashboardData = {
       stats: {
         classesToday,
         activeCourses,
         totalStudents: Math.floor(totalStudents * 0.3),
-        totalAssignments: 8
+        totalAssignments
       },
       upcomingClasses,
       recentActivities,
       facultyInfo: {
-        name: facultyProfile?.user
-          ? `${facultyProfile.user.firstName || ''} ${facultyProfile.user.lastName || ''}`.trim()
-          : `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim(),
-        email: facultyProfile?.user?.email || req.user.email,
+        name: `${req.user.firstName} ${req.user.lastName}`,
+        email: req.user.email,
         department: facultyProfile?.department || 'Not specified',
-        employeeId: facultyProfile?.employeeId || 'N/A',
-        designation: facultyProfile?.designation || 'N/A'
+        employeeId: facultyProfile?.employeeId || 'N/A'
       }
     };
 
-    res.json({
-      success: true,
-      message: 'Faculty dashboard data retrieved successfully',
-      data: dashboardData
-    });
+    res.json({ success: true, message: 'Faculty dashboard data retrieved successfully', data: dashboardData });
+
   } catch (error) {
     console.error('Faculty dashboard error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch faculty dashboard data',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Failed to fetch faculty dashboard data', error: error.message });
+  }
+});
+
+// @route   GET /api/faculty/teaching-assignments
+// @desc    List admin-assigned teaching assignments for the logged-in faculty
+// @access  Private (Faculty only)
+router.get('/teaching-assignments', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { session, academicYear, status } = req.query;
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id }).select('_id employeeId');
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    const query = { facultyId: faculty._id };
+    if (session) query.session = session;
+    if (academicYear) query.academicYear = academicYear;
+    if (status === 'completed') query.completed = true;
+    if (status === 'active') query.completed = false;
+
+    const items = await FacultyAssignment.find(query).sort({ startDate: 1 }).lean();
+
+    // Provide simple computed display fields for frontend convenience
+    const data = items.map(a => ({
+      _id: a._id,
+      facultyId: String(a.facultyId),
+      academicYear: a.academicYear,
+      session: a.session,
+      assignmentType: a.assignmentType,
+      startDate: a.startDate,
+      endDate: a.endDate,
+      workload: a.workload || 0,
+      notes: a.notes || '',
+      completed: !!a.completed,
+      courseId: a.courseId || 'GENERAL',
+      classId: a.classId || 'GENERAL',
+      course: a.courseId && a.courseId !== 'GENERAL' ? { code: a.courseId } : { code: 'GENERAL', courseName: 'General' },
+      class: a.classId && a.classId !== 'GENERAL' ? { id: a.classId } : { id: 'GENERAL', name: 'General' }
+    }));
+
+    res.json({ success: true, message: 'Teaching assignments retrieved', data });
+  } catch (error) {
+    console.error('Faculty teaching assignments error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve teaching assignments', error: error.message });
   }
 });
 
 // @route   GET /api/faculty/classes
 // @desc    Get assigned classes
 // @access  Private (Faculty only)
-router.get('/classes', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get assigned classes endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/faculty/classes',
-      returns: ['class_list', 'subject', 'schedule', 'student_count']
+router.get('/classes', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
     }
-  });
+
+    const courses = await Course.find({ faculty: faculty._id })
+      .populate('faculty', 'employeeId department designation')
+      .populate('enrolledStudents', 'studentId rollNumber user')
+      .sort({ class: 1, subject: 1 });
+
+    res.json({ success: true, message: 'Assigned courses retrieved', data: courses });
+  } catch (error) {
+    console.error('Faculty get classes error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve classes', error: error.message });
+  }
 });
 
 // @route   GET /api/faculty/students
@@ -144,12 +229,172 @@ router.get('/students', (req, res) => {
   });
 });
 
+// @route   POST /api/faculty/courses
+// @desc    Create a course taught by the faculty
+// @access  Private (Faculty only)
+router.post('/courses', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { courseName, subject, class: classNameRaw, section: sectionRaw, schedule, description, maxStudents } = req.body;
+    if (!courseName || !subject || !classNameRaw) {
+      return res.status(400).json({ success: false, message: 'courseName, subject and class are required' });
+    }
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    // Normalize class and optional section
+    let section = (sectionRaw || '').trim().toUpperCase();
+    let className = String(classNameRaw).trim().toUpperCase();
+    if (!section && (className.includes('-') || className.includes(' '))) {
+      const parts = className.split(/[\s-]+/).filter(Boolean);
+      if (parts.length >= 2) {
+        className = parts[0];
+        section = parts[1];
+      }
+    }
+    const allowedClasses = ['NS','LKG','UKG','1','2','3','4','5','6','7','8','9','10','11','12'];
+    if (!allowedClasses.includes(className)) {
+      return res.status(400).json({ success: false, message: 'Invalid class. Use one of NS, LKG, UKG, 1-12 (section optional).' });
+    }
+    const safeSchedule = {
+      days: Array.isArray(schedule?.days) ? schedule.days : (typeof schedule?.days === 'string' ? schedule.days.split(',').map(d=>d.trim()).filter(Boolean) : []),
+      startTime: schedule?.startTime || '',
+      endTime: schedule?.endTime || ''
+    };
+    const course = new Course({
+      courseName,
+      subject,
+      class: className,
+      section,
+      faculty: faculty._id,
+      schedule: safeSchedule,
+      description: description || '',
+      maxStudents: maxStudents || 0,
+      enrolledStudents: []
+    });
+    await course.save();
+    await course.populate('faculty', 'employeeId department designation');
+
+    res.json({ success: true, message: 'Course created successfully', data: course });
+  } catch (error) {
+    console.error('Create course error:', error);
+    if (error.name === 'ValidationError') {
+      const errors = Object.keys(error.errors || {}).map(k => ({ path: k, message: error.errors[k].message }));
+      return res.status(422).json({ success: false, message: 'Validation error. Please check your input.', errors });
+    }
+    res.status(500).json({ success: false, message: 'Failed to create course', error: error.message });
+  }
+});
+
+// @route   DELETE /api/faculty/courses/:id
+// @desc    Delete a course created by the logged-in faculty (owns-only)
+// @access  Private (Faculty only)
+router.delete('/courses/:id', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id }).select('_id');
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    const deleted = await Course.findOneAndDelete({ _id: id, faculty: faculty._id });
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'Course not found or not owned by you' });
+    }
+
+    return res.json({ success: true, message: 'Course deleted successfully' });
+  } catch (error) {
+    console.error('Delete course error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete course', error: error.message });
+  }
+});
+
+// @route   POST /api/faculty/assignments
+// @desc    Create assignment for a course/class
+// @access  Private (Faculty only)
+router.post('/assignments', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { title, description, subject, class: className, section, courseId, dueDate } = req.body;
+    if (!title || !subject || !className || !dueDate) {
+      return res.status(400).json({ success: false, message: 'title, subject, class and dueDate are required' });
+    }
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+
+    const payload = {
+      title,
+      description: description || '',
+      subject,
+      class: className,
+      section: section || '',
+      dueDate: new Date(dueDate),
+      createdBy: faculty._id
+    };
+    if (courseId) payload.course = courseId;
+
+    const assignment = new Assignment(payload);
+    await assignment.save();
+    await assignment.populate('createdBy', 'employeeId department designation');
+
+    res.json({ success: true, message: 'Assignment created successfully', data: assignment });
+  } catch (error) {
+    console.error('Create assignment error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create assignment', error: error.message });
+  }
+});
+
+// @route   GET /api/faculty/assignments
+// @desc    List assignments created by faculty
+// @access  Private (Faculty only)
+router.get('/assignments', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+
+    const { class: className, subject } = req.query;
+    const query = { createdBy: faculty._id };
+    if (className) query.class = className;
+    if (subject) query.subject = subject;
+
+    const assignments = await Assignment.find(query)
+      .populate('course', 'courseName subject class section')
+      .sort({ dueDate: 1 });
+
+    res.json({ success: true, message: 'Assignments retrieved successfully', data: assignments });
+  } catch (error) {
+    console.error('Get assignments error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve assignments', error: error.message });
+  }
+});
+
+// @route   GET /api/faculty/assignments/:id/submissions
+// @desc    List submissions for a specific assignment created by the faculty
+// @access  Private (Faculty only)
+router.get('/assignments/:id/submissions', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+
+    const assignment = await Assignment.findById(req.params.id);
+    if (!assignment) return res.status(404).json({ success: false, message: 'Assignment not found' });
+    if (String(assignment.createdBy) !== String(faculty._id)) {
+      return res.status(403).json({ success: false, message: 'Not authorized to view submissions for this assignment' });
+    }
+
+    const submissions = await AssignmentSubmission.find({ assignment: assignment._id })
+      .populate('student', 'studentId rollNumber user')
+      .sort({ submittedAt: -1 });
+
+    res.json({ success: true, message: 'Submissions retrieved successfully', data: submissions });
+  } catch (error) {
+    console.error('Get assignment submissions error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve submissions', error: error.message });
+  }
+});
+
 // @route   POST /api/faculty/attendance
 // @desc    Mark student attendance
 // @access  Private (Faculty only)
 const { body, query } = require('express-validator');
-const Attendance = require('../models/Attendance');
-const Course = require('../models/Course');
+const mongoose = require('mongoose');
 
 router.post(
   '/attendance',
@@ -176,6 +421,12 @@ router.post(
       const { records, date } = req.body;
       const academicYear = req.body.academicYear || (() => { const y = new Date().getFullYear(); return `${y}-${y+1}`; })();
 
+      // Resolve faculty profile for references
+      const facultyProfile = await Faculty.findOne({ user: req.user._id || req.user.id }).select('_id');
+      if (!facultyProfile) {
+        return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+      }
+
       // Optionally validate course exists and belongs to faculty
       const courseIds = [...new Set(records.map(r => r.course))];
       const courses = await Course.find({ _id: { $in: courseIds } });
@@ -183,18 +434,38 @@ router.post(
         return res.status(400).json({ success: false, message: 'Invalid course in records' });
       }
 
-      const docs = records.map(r => ({
+      // Resolve student identifiers: allow Student ObjectId OR studentId/rollNumber strings
+      const resolvedRecords = [];
+      for (const r of records) {
+        let studentObjId = null;
+        // If a valid ObjectId string passed, use it directly
+        if (typeof r.student === 'string' && mongoose.Types.ObjectId.isValid(r.student)) {
+          studentObjId = r.student;
+        } else {
+          // Try lookup by studentId, then by rollNumber
+          const stu = await Student.findOne({ studentId: r.student })
+            || await Student.findOne({ rollNumber: r.student })
+            || await Student.findOne({ admissionNumber: r.student });
+          if (!stu) {
+            return res.status(400).json({ success: false, message: `Student not found for identifier: ${r.student}` });
+          }
+          studentObjId = stu._id;
+        }
+        resolvedRecords.push({ ...r, student: studentObjId });
+      }
+
+      const docs = resolvedRecords.map(r => ({
         student: r.student,
         course: r.course,
-        faculty: req.user._id,
+        faculty: facultyProfile._id,
         date: date || new Date(),
         status: r.status,
         timeIn: r.timeIn,
         timeOut: r.timeOut,
         remarks: r.remarks,
-        markedBy: req.user._id,
+        markedBy: facultyProfile._id,
         academicYear,
-        session: r.session || r.semester,
+        session: r.session || r.semester || '1',
       }));
 
       // Upsert-like: try create, if duplicate key then skip
@@ -211,7 +482,7 @@ router.post(
       return res.status(201).json({ success: true, message: 'Attendance marked', data: results });
     } catch (error) {
       console.error('Mark attendance error:', error);
-      res.status(500).json({ success: false, message: 'Failed to mark attendance' });
+      res.status(500).json({ success: false, message: 'Failed to mark attendance', error: error.message });
     }
   }
 );
@@ -338,64 +609,345 @@ router.put('/submissions/:id/grade', (req, res) => {
 // @route   POST /api/faculty/online-classes
 // @desc    Schedule online class
 // @access  Private (Faculty only)
-router.post('/online-classes', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Schedule online class endpoint - To be implemented',
-    data: {
-      endpoint: 'POST /api/faculty/online-classes',
-      required_fields: ['title', 'class', 'subject', 'date', 'time', 'duration']
+router.post('/online-classes', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { title, subject, className, date, time, duration, platform, description } = req.body;
+    
+    // Validate required fields
+    if (!title || !subject || !className || !date || !time || !duration || !platform) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'All required fields must be provided' 
+      });
     }
-  });
+
+    // Get faculty profile
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    // Get students for the specified class
+    const students = await Student.find({ class: className, status: 'active' })
+      .select('_id studentId rollNumber');
+
+    // Create new online class
+    const onlineClass = new OnlineClass({
+      title,
+      subject,
+      className,
+      faculty: faculty._id,
+      date: new Date(date),
+      time,
+      duration,
+      platform,
+      description: description || '',
+      students: students.map(s => s._id)
+    });
+
+    // Generate meeting link will be done automatically by pre-save middleware
+    await onlineClass.save();
+
+    // Populate faculty and students for response
+    await onlineClass.populate('faculty', 'employeeId department designation');
+    await onlineClass.populate('students', 'studentId rollNumber user');
+
+    res.json({
+      success: true,
+      message: 'Online class created successfully',
+      data: onlineClass
+    });
+  } catch (error) {
+    console.error('Create online class error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create online class',
+      error: error.message 
+    });
+  }
 });
 
 // @route   GET /api/faculty/online-classes
 // @desc    Get scheduled online classes
 // @access  Private (Faculty only)
-router.get('/online-classes', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get online classes endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/faculty/online-classes',
-      query_params: ['date_from', 'date_to', 'class', 'subject']
+router.get('/online-classes', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
     }
-  });
+
+    // Build query
+    let query = { faculty: faculty._id };
+    
+    // Add filters if provided
+    if (req.query.date_from) {
+      query.date = { $gte: new Date(req.query.date_from) };
+    }
+    if (req.query.date_to) {
+      query.date = { ...query.date, $lte: new Date(req.query.date_to) };
+    }
+    if (req.query.class) {
+      query.className = req.query.class;
+    }
+    if (req.query.subject) {
+      query.subject = req.query.subject;
+    }
+
+    const onlineClasses = await OnlineClass.find(query)
+      .populate('faculty', 'employeeId department designation')
+      .populate('students', 'studentId rollNumber user')
+      .sort({ date: -1, time: -1 });
+
+    res.json({
+      success: true,
+      message: 'Online classes retrieved successfully',
+      data: onlineClasses
+    });
+  } catch (error) {
+    console.error('Get online classes error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to retrieve online classes',
+      error: error.message 
+    });
+  }
 });
 
-// Implement GET /api/faculty/profile
+// Test GET route after working GET route - exact copy of working route
+router.get('/test-after-get', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    res.json({ success: true, message: 'GET works after GET' });
+  } catch (error) {
+    console.error('Test route error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+// Test PATCH route after working GET route - exact copy of working route but PATCH
+router.patch('/test-after-get', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    res.json({ success: true, message: 'PATCH works after GET' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// @route   GET /api/faculty/online-classes/:id
+// @desc    Get single online class by ID
+// @access  Private (Faculty only)
+router.get('/online-classes/:id', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const onlineClass = await OnlineClass.findById(req.params.id)
+      .populate('faculty', 'employeeId department designation')
+      .populate('students', 'studentId rollNumber user');
+
+    if (!onlineClass) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Online class not found' 
+      });
+    }
+
+    // Check if the faculty member owns this class
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty || onlineClass.faculty._id.toString() !== faculty._id.toString()) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Access denied' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Online class retrieved successfully',
+      data: onlineClass
+    });
+  } catch (error) {
+    console.error('Get single online class error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to retrieve online class',
+      error: error.message 
+    });
+  }
+});
+
+// Test route to verify PATCH method works
+router.patch('/test-patch', (req, res) => {
+  res.json({ success: true, message: 'PATCH method works' });
+});
+
+// @route   PATCH /api/faculty/online-classes/:id/status
+// @desc    Update online class status
+// @access  Private (Faculty only)
+router.patch('/online-classes/:id/status', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    // Validate status to match schema and frontend usage
+    // Accept synonyms: 'live' (preferred) and 'in-progress' (legacy)
+    const normalizedStatus =
+      status === 'in-progress' ? 'live' : status;
+
+    if (!['scheduled', 'live', 'completed', 'cancelled'].includes(normalizedStatus)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid status. Must be one of: scheduled, live, completed, cancelled' 
+      });
+    }
+
+    // Get faculty profile
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    // Find and update online class
+    const onlineClass = await OnlineClass.findOneAndUpdate(
+      { _id: req.params.id, faculty: faculty._id },
+      { status: normalizedStatus },
+      { new: true }
+    ).populate('faculty', 'employeeId department designation')
+     .populate('students', 'studentId rollNumber user');
+
+    if (!onlineClass) {
+      return res.status(404).json({ success: false, message: 'Online class not found or not authorized' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Online class status updated successfully',
+      data: onlineClass
+    });
+  } catch (error) {
+    console.error('Update online class status error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update online class status',
+      error: error.message 
+    });
+  }
+});
+
+// @route   PUT /api/faculty/online-classes/:id
+// @desc    Update online class details
+// @access  Private (Faculty only)
+router.put('/online-classes/:id', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    const { title, subject, className, date, time, duration, platform, description } = req.body;
+
+    // Get faculty profile
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    // Find and update online class
+    const updateData = {};
+    if (title) updateData.title = title;
+    if (subject) updateData.subject = subject;
+    if (className) updateData.className = className;
+    if (date) updateData.date = new Date(date);
+    if (time) updateData.time = time;
+    if (duration) updateData.duration = duration;
+    if (platform) updateData.platform = platform;
+    if (description !== undefined) updateData.description = description;
+
+    const onlineClass = await OnlineClass.findOneAndUpdate(
+      { _id: req.params.id, faculty: faculty._id },
+      updateData,
+      { new: true }
+    ).populate('faculty', 'employeeId department designation')
+     .populate('students', 'studentId rollNumber user');
+
+    if (!onlineClass) {
+      return res.status(404).json({ success: false, message: 'Online class not found or not authorized' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Online class updated successfully',
+      data: onlineClass
+    });
+  } catch (error) {
+    console.error('Update online class error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to update online class',
+      error: error.message 
+    });
+  }
+});
+
+// @route   DELETE /api/faculty/online-classes/:id
+// @desc    Delete online class
+// @access  Private (Faculty only)
+router.delete('/online-classes/:id', authenticateToken, requireRole(['faculty']), async (req, res) => {
+  try {
+    // Get faculty profile
+    const faculty = await Faculty.findOne({ user: req.user._id || req.user.id });
+    if (!faculty) {
+      return res.status(404).json({ success: false, message: 'Faculty profile not found' });
+    }
+
+    // Find and delete online class
+    const onlineClass = await OnlineClass.findOneAndDelete({
+      _id: req.params.id,
+      faculty: faculty._id
+    });
+
+    if (!onlineClass) {
+      return res.status(404).json({ success: false, message: 'Online class not found or not authorized' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Online class deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete online class error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete online class',
+      error: error.message 
+    });
+  }
+});
+
+// @route   GET /api/faculty/profile
+// @desc    Get faculty profile
+// @access  Private (Faculty only)
 router.get('/profile', authenticateToken, requireRole(['faculty']), async (req, res) => {
   try {
     const faculty = await Faculty
       .findOne({ user: req.user._id || req.user.id })
-      .populate('user', 'firstName lastName email phone status address');
+      .populate('user', 'firstName lastName email phone');
 
     if (!faculty) {
       return res.status(404).json({ success: false, message: 'Faculty profile not found' });
     }
 
-    res.json({
-      success: true,
-      message: 'Faculty profile retrieved successfully',
-      data: {
-        id: String(faculty._id),
-        employeeId: faculty.employeeId,
-        department: faculty.department,
-        designation: faculty.designation,
-        joiningDate: faculty.joiningDate,
-        subjects: faculty.subjects,
-        classes: faculty.classes,
-        status: faculty.status,
-        user: {
-          id: String(faculty.user._id),
-          name: `${faculty.user.firstName || ''} ${faculty.user.lastName || ''}`.trim(),
-          email: faculty.user.email,
-          phone: faculty.user.phone,
-          status: faculty.user.status,
-          address: faculty.user.address || {}
-        }
-      }
-    });
+    const name = faculty.user
+      ? `${faculty.user.firstName || ''} ${faculty.user.lastName || ''}`.trim() || 'Unknown'
+      : `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'Unknown';
+
+    const data = {
+      user: {
+        name,
+        email: faculty.user?.email || req.user.email || 'N/A',
+        phone: faculty.user?.phone || req.user.phone || 'N/A',
+      },
+      department: faculty.department || 'Not specified',
+      designation: faculty.designation || 'Not specified',
+      employeeId: faculty.employeeId || 'N/A',
+      joiningDate: faculty.joiningDate || null
+    };
+
+    res.json({ success: true, message: 'Faculty profile retrieved successfully', data });
   } catch (error) {
     console.error('Get faculty profile error:', error);
     res.status(500).json({ success: false, message: 'Failed to fetch faculty profile', error: error.message });

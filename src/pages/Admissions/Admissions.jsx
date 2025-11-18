@@ -21,7 +21,7 @@ const Admissions = () => {
   const [formSubmitted, setFormSubmitted] = useState(false);
   
   // OTP Verification States
-  const [otpStep, setOtpStep] = useState('contact'); // 'contact', 'verify', 'verified'
+  const [otpStep, setOtpStep] = useState('verified'); // default to form without OTP
   const [contactInfo, setContactInfo] = useState({
     mobile: '',
     email: ''
@@ -58,11 +58,46 @@ const Admissions = () => {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // In a real application, you would send this data to a server
-    console.log('Form submitted:', formData);
-    setFormSubmitted(true);
+    try {
+      // Construct minimal payload for backend /api/general/admissions
+      const payload = {
+        studentInfo: {
+          fullName: formData.fullName || 'Unknown',
+          dateOfBirth: '2005-01-01', // default for demo; can be collected later
+          gender: 'other'
+        },
+        academicInfo: {
+          applyingForClass: formData.grade || 'Grade 1',
+          academicYear: new Date().getFullYear() + '-' + (new Date().getFullYear() + 1)
+        },
+        contactInfo: {
+          email: formData.email,
+          phone: formData.phone,
+          address: {
+            street: formData.address || '—',
+            city: '—',
+            state: '—',
+            pincode: '000000'
+          }
+        },
+        parentInfo: {
+          father: { name: formData.parentName || 'Parent', phone: formData.phone }
+        },
+        previousSchool: formData.previousSchool || ''
+      };
+
+      const res = await generalAPI.submitAdmission(payload);
+      if (res.data?.success) {
+        setFormSubmitted(true);
+      } else {
+        alert(res.data?.message || 'Failed to submit application');
+      }
+    } catch (error) {
+      console.error('Submit admission error:', error);
+      alert(error.userMessage || 'Failed to submit application. Please try again.');
+    }
   };
 
   // OTP Verification Handlers
@@ -264,7 +299,7 @@ const Admissions = () => {
                   <p>Application Reference: <strong>APP-{Math.floor(Math.random() * 10000)}</strong></p>
                   <button className="btn-primary" onClick={() => {
                     setFormSubmitted(false);
-                    setOtpStep('contact');
+                    setOtpStep('verified');
                     setContactInfo({ mobile: '', email: '' });
                     setOtpData({ mobileOtp: '', emailOtp: '', mobileVerified: false, emailVerified: false });
                     setOtpSent({ mobile: false, email: false });
@@ -392,8 +427,8 @@ const Admissions = () => {
                 <>
                   <div className="verified-header">
                     <FaCheck className="verified-icon" />
-                    <h2>Verification Complete - Online Application Form</h2>
-                    <p>Your contact details have been verified. Please fill out the form below to complete your admission application.</p>
+                    <h2>Online Application Form</h2>
+                    <p>Please fill out the form below to complete your admission application.</p>
                   </div>
                   
                   <form className="admissions-form" onSubmit={handleSubmit}>
@@ -469,11 +504,11 @@ const Admissions = () => {
                           required
                         >
                           <option value="">Select Grade</option>
-                          <option value="Nursery">Nursery</option>
+                          <option value="NS">NS</option>
                           <option value="LKG">LKG</option>
                           <option value="UKG">UKG</option>
                           {[...Array(12)].map((_, i) => (
-                            <option key={i} value={`Grade ${i+1}`}>Grade {i+1}</option>
+                            <option key={i} value={`${i+1}`}> {i+1}</option>
                           ))}
                         </select>
                       </div>

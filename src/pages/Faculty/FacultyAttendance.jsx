@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { FaCalendarAlt, FaCheckCircle, FaTimesCircle } from 'react-icons/fa';
+import React, { useEffect, useState } from 'react';
+import { FaCalendarAlt } from 'react-icons/fa';
 import { useSearchParams } from 'react-router-dom';
 import { useNotification } from '../../hooks/useNotification.js';
 import { facultyAPI } from '../../services/api.js';
-import config from '../../config/config.js';
 import './FacultyAttendance.css';
 import jsPDF from 'jspdf';
 
@@ -11,18 +10,26 @@ export default function FacultyAttendance() {
   const today = new Date().toISOString().slice(0, 10);
   const [searchParams, setSearchParams] = useSearchParams();
   const { showSuccess, showError } = useNotification();
+
+  // Minimal state for simple marking
   const [date, setDate] = useState(today);
-  const [filter, setFilter] = useState('all');
-  const [courseId, setCourseId] = useState('');
+  const [classes, setClasses] = useState([]);
+  const [selectedClass, setSelectedClass] = useState('');
+  const [studentIdInput, setStudentIdInput] = useState('');
+  const [status, setStatus] = useState('Present'); // Present | Absent
+  const [timeIn, setTimeIn] = useState(() => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  });
   const [remarks, setRemarks] = useState('');
-  const [search, setSearch] = useState('');
-  const [students, setStudents] = useState([]);
   const [submitting, setSubmitting] = useState(false);
-  const [loadError, setLoadError] = useState(null);
   const [submitMessage, setSubmitMessage] = useState(null);
   const [records, setRecords] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [loadError, setLoadError] = useState(null);
+  const [courseId, setCourseId] = useState('');
 
   useEffect(() => {
     // Initialize from URL params
@@ -30,29 +37,32 @@ export default function FacultyAttendance() {
     const urlCourse = searchParams.get('course');
     if (urlDate) setDate(urlDate);
     if (urlCourse) setCourseId(urlCourse);
-    const fetchStudents = async () => {
+    const fetchClasses = async () => {
       try {
         setLoadError(null);
-        const res = await facultyAPI.getStudents();
-        const data = res.data?.data;
-        // Expect backend to return an array in future; currently may be placeholder
-        const list = Array.isArray(data) ? data : [];
-        const mapped = list.map(s => ({
-          _id: s._id || s.id || s.studentId || String(Math.random()),
-          name: s.name || (s.firstName && s.lastName ? `${s.firstName} ${s.lastName}` : 'Student'),
-          class: s.class || s.className || '-',
-          status: 'Present'
-        }));
-        setStudents(mapped);
+        const classesRes = await facultyAPI.getClasses();
+        const classData = Array.isArray(classesRes.data?.data) ? classesRes.data.data : [];
+        setClasses(classData);
+        // Auto-select first class if none chosen yet
+        if (!selectedClass && classData.length > 0) {
+          setSelectedClass(classData[0].class || classData[0].className || '');
+        }
       } catch (err) {
-        console.error('Failed to load students:', err);
-        setLoadError(err.userMessage || 'Failed to load students');
-        setStudents([]);
+        console.error('Failed to load classes:', err);
+        setLoadError(err.userMessage || 'Failed to load classes');
       }
     };
-
-    fetchStudents();
+    fetchClasses();
   }, []);
+
+  // Derive courseId when class changes
+  useEffect(() => {
+    if (!selectedClass || classes.length === 0) return;
+    const match = classes.find((c) => c.class === selectedClass);
+    // Course documents use _id (or id) — not courseId
+    const cid = match?._id || match?.id || match?.courseId;
+    if (cid) setCourseId(cid);
+  }, [selectedClass, classes]);
 
   // Persist date and course in URL params for shareable views
   useEffect(() => {
@@ -60,55 +70,12 @@ export default function FacultyAttendance() {
     if (date) next.set('date', date); else next.delete('date');
     if (courseId) next.set('course', courseId); else next.delete('course');
     setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date, courseId]);
-
-  // Keep selected index within bounds when filtered list changes
+  // Load records whenever date or course changes
   useEffect(() => {
-    setSelectedIndex((i) => {
-      if (filtered.length === 0) return 0;
-      return Math.min(i, filtered.length - 1);
-    });
-  }, [filtered.length]);
-
-  const filtered = useMemo(() => {
-    const byFilter = students.filter(s =>
-      filter === 'all' ? true : (filter === 'present' ? s.status === 'Present' : s.status === 'Absent')
-    );
-    const q = search.trim().toLowerCase();
-    return q ? byFilter.filter(s => s.name.toLowerCase().includes(q)) : byFilter;
-  }, [students, filter, search]);
-
-  const presentCount = useMemo(() => students.filter(s => s.status === 'Present').length, [students]);
-  const absentCount = useMemo(() => students.filter(s => s.status === 'Absent').length, [students]);
-
-  // Keyboard navigation: Up/Down to move selection, Space to toggle
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      const active = document.activeElement;
-      const tag = active?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || active?.isContentEditable) return;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === ' ') {
-        e.preventDefault();
-        const item = filtered[selectedIndex];
-        if (item) toggleStatus(item._id);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [filtered, selectedIndex]);
-
-  const toggleStatus = (id) => {
-    setStudents(prev => prev.map(s => s._id === id ? { ...s, status: s.status === 'Present' ? 'Absent' : 'Present' } : s));
-  };
+    if (!courseId || !date) return;
+    loadAttendanceRecords();
+  }, [courseId, date]);
 
   const onSubmitAttendance = async () => {
     try {
@@ -117,8 +84,14 @@ export default function FacultyAttendance() {
       setLoadError(null);
 
       if (!courseId) {
-        setSubmitMessage('Please enter a Course ID.');
-        showError('Please enter a Course ID');
+        setSubmitMessage('Please select a class to auto-fill course.');
+        showError('Please select a class');
+        return;
+      }
+
+      const trimmedId = studentIdInput.trim();
+      if (!trimmedId) {
+        showError('Please enter a Student ID');
         return;
       }
 
@@ -126,13 +99,18 @@ export default function FacultyAttendance() {
         course: courseId,
         date,
         remarks,
-        records: students.map(s => ({
-          student: s._id,
-          course: courseId,
-          date,
-          status: s.status === 'Present' ? 'present' : 'absent',
-          remarks,
-        }))
+        records: [
+          {
+            student: trimmedId,
+            class: selectedClass || undefined,
+            course: courseId,
+            date,
+            status,
+            timeIn: (status === 'Present' || status === 'Late') ? timeIn : undefined,
+            session: '1',
+            remarks,
+          },
+        ],
       };
 
       const res = await facultyAPI.markAttendance(payload);
@@ -141,7 +119,7 @@ export default function FacultyAttendance() {
         setSubmitMessage(`Attendance saved. Created: ${data.data?.created ?? 0}, Duplicates: ${data.data?.duplicates ?? 0}`);
         showSuccess('Attendance submitted successfully');
       } else {
-        const msg = data?.message || 'Failed to save attendance';
+        const msg = data?.message + (data?.error ? `: ${data.error}` : '') || 'Failed to save attendance';
         setSubmitMessage(msg);
         showError(msg);
       }
@@ -282,20 +260,24 @@ export default function FacultyAttendance() {
       <div className="attendance-header">
         <div>
           <h1>Faculty Attendance</h1>
-          <p>Mark and review attendance for your classes.</p>
-        </div>
-        <div className="summary">
-          <span className="summary-chip present">Present: {presentCount}</span>
-          <span className="summary-chip absent">Absent: {absentCount}</span>
-          <span className="summary-chip total">Total: {students.length}</span>
+          <p>Mark attendance by Class and Student ID.</p>
         </div>
       </div>
 
       <div className="attendance-toolbar">
         <div className="field">
-          <label>Course ID</label>
-          <input type="text" placeholder="e.g. COURSE123" value={courseId} onChange={(e) => setCourseId(e.target.value)} />
+          <label>Class</label>
+          <select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>
+            <option value="">Select class</option>
+            <option value="NS">NS</option>
+            <option value="LKG">LKG</option>
+            <option value="UKG">UKG</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+              <option key={`grade-${n}`} value={String(n)}>{n}</option>
+            ))}
+          </select>
         </div>
+
         <div className="field">
           <label>Date</label>
           <div className="date-input">
@@ -303,28 +285,40 @@ export default function FacultyAttendance() {
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </div>
         </div>
+
+        <div className="field grow">
+          <label>Student ID</label>
+          <input
+            type="text"
+            placeholder="Enter Student ID"
+            value={studentIdInput}
+            onChange={(e) => setStudentIdInput(e.target.value)}
+          />
+        </div>
+
         <div className="field">
-          <label>Filter</label>
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="all">All</option>
-            <option value="present">Present</option>
-            <option value="absent">Absent</option>
+          <label>Status</label>
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="Present">Present</option>
+            <option value="Absent">Absent</option>
           </select>
         </div>
-        <div className="field grow">
-          <label>Search</label>
-          <input type="text" placeholder="Search student name" value={search} onChange={(e) => setSearch(e.target.value)} />
-        </div>
+
+        {status === 'Present' && (
+          <div className="field">
+            <label>Time In</label>
+            <input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
+          </div>
+        )}
+
         <div className="field grow">
           <label>Remarks</label>
           <input type="text" placeholder="Optional remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} />
         </div>
+
         <div className="actions">
-          <button className="btn" onClick={() => setStudents(prev => prev.map(s => ({ ...s, status: 'Present' })))}>Mark all present</button>
-          <button className="btn" onClick={() => setStudents(prev => prev.map(s => ({ ...s, status: 'Absent' })))}>Mark all absent</button>
-          <button className="btn" onClick={() => { setStudents(prev => prev.map(s => ({ ...s, status: 'Present' }))); setFilter('all'); }}>Reset</button>
-          <button className="btn primary" onClick={onSubmitAttendance} disabled={submitting}>
-            {submitting ? 'Submitting…' : 'Submit Attendance'}
+          <button className="btn primary" onClick={onSubmitAttendance} disabled={submitting || !selectedClass || !studentIdInput.trim()}>
+            {submitting ? 'Submitting…' : 'Mark Attendance'}
           </button>
         </div>
       </div>
@@ -333,53 +327,18 @@ export default function FacultyAttendance() {
         <div className={`inline-message ${submitMessage.includes('Failed') ? 'error' : 'info'}`}>{submitMessage}</div>
       )}
 
-      <div className="table-wrapper">
-        <table className="attendance-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Class</th>
-              <th>Status</th>
-              <th>Toggle</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((s, i) => (
-              <tr key={s._id} className={i === selectedIndex ? 'selected' : ''} onClick={() => setSelectedIndex(i)}>
-                <td>{s.name}</td>
-                <td>{s.class}</td>
-                <td className={s.status === 'Present' ? 'status-present' : 'status-absent'}>{s.status}</td>
-                <td>
-                  <button className={`toggle-btn ${s.status === 'Present' ? 'present' : 'absent'}`} onClick={() => toggleStatus(s._id)}>
-                    {s.status === 'Present' ? <FaTimesCircle /> : <FaCheckCircle />} {s.status === 'Present' ? 'Mark Absent' : 'Mark Present'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="secondary-actions">
-        <button className="btn" onClick={loadAttendanceRecords}>Load Records</button>
-        <button className="btn" onClick={exportRecordsToCSV}>Export CSV</button>
-        <button className="btn" onClick={exportRecordsToPDF}>Export PDF</button>
-        <span className="kbd-tip">Tip: ↑/↓ to move, Space to toggle</span>
-      </div>
-
+      {/* Recent Records (optional) */}
       <div className="records">
-        <h2>Recent Attendance Records</h2>
-        {loadingRecords && <p className="muted">Loading records…</p>}
-        {loadError && !loadingRecords && <p className="error">Error: {loadError}</p>}
-        {!loadingRecords && records.length === 0 && <p className="muted">No records to display.</p>}
+        <h2>Records for {date}</h2>
+        {!loadingRecords && records.length === 0 && <p className="muted">No records found for selected date.</p>}
+        {loadError && <p className="error">Error: {loadError}</p>}
         {records.length > 0 && (
           <div className="table-wrapper">
             <table className="attendance-table">
               <thead>
                 <tr>
-                  <th>Date</th>
                   <th>Student</th>
-                  <th>Course</th>
+                  <th>Class</th>
                   <th>Status</th>
                   <th>Remarks</th>
                 </tr>
@@ -387,10 +346,9 @@ export default function FacultyAttendance() {
               <tbody>
                 {records.map((r) => (
                   <tr key={r._id}>
-                    <td>{new Date(r.date).toLocaleDateString()}</td>
-                    <td>{r.student?.name || r.student?.studentId || r.student}</td>
-                    <td>{r.course?.courseCode || r.course}</td>
-                    <td className={r.status === 'present' ? 'status-present' : 'status-absent'}>{r.status}</td>
+                    <td>{r.student?.name || r.student?.studentId || '-'}</td>
+                    <td>{r.course?.class || '-'}</td>
+                    <td className={r.status === 'Present' ? 'status-present' : 'status-absent'}>{r.status}</td>
                     <td>{r.remarks || '-'}</td>
                   </tr>
                 ))}

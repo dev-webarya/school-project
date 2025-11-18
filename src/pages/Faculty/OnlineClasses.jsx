@@ -1,53 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FaVideo, FaCalendarAlt, FaClock, FaUsers, FaPlus, FaEdit, FaTrash, FaPlay, FaStop } from 'react-icons/fa';
+import { facultyAPI } from '../../services/api';
+import { useNotification } from '../../hooks/useNotification';
+import { useLoading } from '../../hooks/useLoading';
 
 export default function OnlineClasses() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [classes, setClasses] = useState([
-    {
-      id: 1,
-      title: 'Mathematics - Algebra Basics',
-      subject: 'Mathematics',
-      class: 'Class 10',
-      date: '2024-01-15',
-      time: '10:00',
-      duration: 60,
-      platform: 'zoom',
-      meetingLink: 'https://zoom.us/j/123456789',
-      status: 'scheduled',
-      students: 25,
-      description: 'Introduction to algebraic expressions and equations'
-    },
-    {
-      id: 2,
-      title: 'Physics - Motion and Force',
-      subject: 'Physics',
-      class: 'Class 11',
-      date: '2024-01-15',
-      time: '14:00',
-      duration: 45,
-      platform: 'meet',
-      meetingLink: 'https://meet.google.com/abc-defg-hij',
-      status: 'live',
-      students: 30,
-      description: 'Understanding Newton\'s laws of motion'
-    }
-  ]);
+  const [classes, setClasses] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  
+  const { startLoading, stopLoading } = useLoading();
+  const { showSuccess, showError } = useNotification();
 
   const [formData, setFormData] = useState({
     title: '',
     subject: '',
-    class: '',
+    className: '',
     date: '',
     time: '',
     duration: 60,
     platform: 'zoom',
-    description: '',
-    students: []
+    description: ''
   });
 
-  const subjects = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Social Studies'];
-  const classOptions = ['Class NS','Class LKG','Class UKG','Class 1','Class 2','Class 3','Class 4','Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'];
+  const subjects = ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English', 'Social Studies', 'Computer Science', 'Hindi'];
+  const classOptions = ['NS', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+
+  // Fetch online classes on component mount
+  useEffect(() => {
+    fetchOnlineClasses();
+  }, []);
+
+  const fetchOnlineClasses = async () => {
+    try {
+      setLoading(true);
+      startLoading('Fetching online classes...');
+      
+      const response = await facultyAPI.getOnlineClasses();
+      if (response.data.success) {
+        if (Array.isArray(response.data.data)) {
+          setClasses(response.data.data);
+        } else {
+          console.warn('API response data is not an array:', response.data.data);
+          setClasses([]);
+        }
+      } else {
+        throw new Error(response.data.message || 'Failed to fetch online classes');
+      }
+    } catch (err) {
+      console.error('Error fetching online classes:', err);
+      setError(err.message || 'Failed to fetch online classes');
+      showError('Failed to fetch online classes');
+      setClasses([]);
+    } finally {
+      setLoading(false);
+      stopLoading();
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -57,32 +67,103 @@ export default function OnlineClasses() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    const newClass = {
-      ...formData,
-      id: Date.now(),
-      status: 'scheduled',
-      // Use explicit students count; avoid demo randomization
-      students: Array.isArray(formData.students) ? formData.students.length : 0,
-      meetingLink: formData.platform === 'zoom' 
-        ? `https://zoom.us/j/${Math.floor(Math.random() * 1000000000)}`
-        : `https://meet.google.com/${Math.random().toString(36).substr(2, 9)}`
-    };
     
-    setClasses(prev => [...prev, newClass]);
-    setFormData({
-      title: '',
-      subject: '',
-      class: '',
-      date: '',
-      time: '',
-      duration: 60,
-      platform: 'zoom',
-      description: '',
-      students: []
-    });
-    setActiveTab('dashboard');
+    try {
+      setLoading(true);
+      startLoading('Creating online class...');
+      
+      const response = await facultyAPI.createOnlineClass(formData);
+      if (response.data.success) {
+        showSuccess('Online class created successfully');
+        setClasses(prev => [...prev, response.data.data]);
+        setFormData({
+          title: '',
+          subject: '',
+          className: '',
+          date: '',
+          time: '',
+          duration: 60,
+          platform: 'zoom',
+          description: ''
+        });
+        setActiveTab('dashboard');
+      } else {
+        throw new Error(response.data.message || 'Failed to create online class');
+      }
+    } catch (err) {
+      console.error('Error creating online class:', err);
+      showError(err.message || 'Failed to create online class');
+    } finally {
+      setLoading(false);
+      stopLoading();
+    }
+  };
+
+  const startClass = async (classId) => {
+    try {
+      startLoading('Starting online class...');
+      
+      const response = await facultyAPI.updateOnlineClassStatus(classId, 'live');
+      if (response.data.success) {
+        showSuccess('Class started successfully');
+        setClasses(prev => prev.map(cls => 
+          cls._id === classId ? { ...cls, status: 'live' } : cls
+        ));
+      } else {
+        throw new Error(response.data.message || 'Failed to start class');
+      }
+    } catch (err) {
+      console.error('Error starting class:', err);
+      showError(err.message || 'Failed to start class');
+    } finally {
+      stopLoading();
+    }
+  };
+
+  const endClass = async (classId) => {
+    try {
+      startLoading('Ending online class...');
+      
+      const response = await facultyAPI.updateOnlineClassStatus(classId, 'completed');
+      if (response.data.success) {
+        showSuccess('Class ended successfully');
+        setClasses(prev => prev.map(cls => 
+          cls._id === classId ? { ...cls, status: 'completed' } : cls
+        ));
+      } else {
+        throw new Error(response.data.message || 'Failed to end class');
+      }
+    } catch (err) {
+      console.error('Error ending class:', err);
+      showError(err.message || 'Failed to end class');
+    } finally {
+      stopLoading();
+    }
+  };
+
+  const deleteClass = async (classId) => {
+    if (!window.confirm('Are you sure you want to delete this class?')) {
+      return;
+    }
+
+    try {
+      startLoading('Deleting online class...');
+      
+      const response = await facultyAPI.deleteOnlineClass(classId);
+      if (response.data.success) {
+        showSuccess('Class deleted successfully');
+        setClasses(prev => prev.filter(cls => cls._id !== classId));
+      } else {
+        throw new Error(response.data.message || 'Failed to delete class');
+      }
+    } catch (err) {
+      console.error('Error deleting class:', err);
+      showError(err.message || 'Failed to delete class');
+    } finally {
+      stopLoading();
+    }
   };
 
   const getStatusColor = (status) => {
@@ -103,21 +184,49 @@ export default function OnlineClasses() {
     }
   };
 
-  const startClass = (classId) => {
-    setClasses(prev => prev.map(cls => 
-      cls.id === classId ? { ...cls, status: 'live' } : cls
-    ));
+  const getPlatformIcon = (platform) => {
+    switch (platform) {
+      case 'zoom': return '🎥';
+      case 'meet': return '📹';
+      case 'teams': return '💻';
+      default: return '📺';
+    }
   };
 
-  const endClass = (classId) => {
-    setClasses(prev => prev.map(cls => 
-      cls.id === classId ? { ...cls, status: 'completed' } : cls
-    ));
-  };
+  // Ensure classes is always treated as an array
+  const safeClasses = Array.isArray(classes) ? classes : [];
 
-  const deleteClass = (classId) => {
-    setClasses(prev => prev.filter(cls => cls.id !== classId));
-  };
+  if (loading && safeClasses.length === 0) {
+    return (
+      <div className="container" style={{ padding: '40px 0', textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: '16px' }}>⏳</div>
+        <p>Loading online classes...</p>
+      </div>
+    );
+  }
+
+  if (error && safeClasses.length === 0) {
+    return (
+      <div className="container" style={{ padding: '40px 0', textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: '16px' }}>❌</div>
+        <p>{error}</p>
+        <button 
+          onClick={fetchOnlineClasses}
+          style={{
+            background: '#1a237e',
+            color: 'white',
+            border: 'none',
+            padding: '12px 24px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            marginTop: '16px'
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -189,7 +298,7 @@ export default function OnlineClasses() {
                 <FaVideo style={{ color: '#4caf50', fontSize: '24px' }} />
                 <div>
                   <h3 style={{ margin: 0, color: '#4caf50' }}>
-                    {classes.filter(c => c.status === 'live').length}
+                    {safeClasses.filter(c => c.status === 'live').length}
                   </h3>
                   <p style={{ margin: 0, color: '#666' }}>Live Classes</p>
                 </div>
@@ -200,7 +309,7 @@ export default function OnlineClasses() {
                 <FaCalendarAlt style={{ color: '#2196f3', fontSize: '24px' }} />
                 <div>
                   <h3 style={{ margin: 0, color: '#2196f3' }}>
-                    {classes.filter(c => c.status === 'scheduled').length}
+                    {safeClasses.filter(c => c.status === 'scheduled').length}
                   </h3>
                   <p style={{ margin: 0, color: '#666' }}>Scheduled</p>
                 </div>
@@ -211,7 +320,7 @@ export default function OnlineClasses() {
                 <FaUsers style={{ color: '#ff9800', fontSize: '24px' }} />
                 <div>
                   <h3 style={{ margin: 0, color: '#ff9800' }}>
-                    {classes.reduce((total, c) => total + c.students, 0)}
+                    {safeClasses.reduce((total, c) => total + (c.students?.length || 0), 0)}
                   </h3>
                   <p style={{ margin: 0, color: '#666' }}>Total Students</p>
                 </div>
@@ -221,16 +330,32 @@ export default function OnlineClasses() {
 
           {/* Classes List */}
           <div style={{ background: 'white', borderRadius: '8px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-            <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Your Classes</h2>
-            {classes.length === 0 ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0 }}>Your Classes</h2>
+              <button
+                onClick={fetchOnlineClasses}
+                style={{
+                  background: '#f5f5f5',
+                  border: '1px solid #ddd',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '14px'
+                }}
+              >
+                🔄 Refresh
+              </button>
+            </div>
+            
+            {safeClasses.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
                 <FaVideo style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.3 }} />
                 <p>No classes scheduled yet. Create your first online class!</p>
               </div>
             ) : (
               <div style={{ display: 'grid', gap: '16px' }}>
-                {classes.map(cls => (
-                  <div key={cls.id} style={{ 
+                {safeClasses.map(cls => (
+                  <div key={cls._id} style={{ 
                     border: '1px solid #e0e0e0', 
                     borderRadius: '8px', 
                     padding: '20px',
@@ -254,7 +379,7 @@ export default function OnlineClasses() {
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '12px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#666' }}>
                             <FaCalendarAlt />
-                            <span>{cls.date} at {cls.time}</span>
+                            <span>{new Date(cls.date).toLocaleDateString()} at {cls.time}</span>
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#666' }}>
                             <FaClock />
@@ -262,10 +387,13 @@ export default function OnlineClasses() {
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#666' }}>
                             <FaUsers />
-                            <span>{cls.students} students</span>
+                            <span>{cls.students?.length || 0} students</span>
                           </div>
                           <div style={{ color: '#666' }}>
-                            <strong>{cls.subject}</strong> - {cls.class}
+                            <strong>{cls.subject}</strong> - Class {cls.className}
+                          </div>
+                          <div style={{ color: '#666' }}>
+                            {cls.platform ? (getPlatformIcon(cls.platform) + ' ' + cls.platform.charAt(0).toUpperCase() + cls.platform.slice(1)) : '📺 Unknown'}
                           </div>
                         </div>
                         <p style={{ margin: 0, color: '#888', fontSize: '14px' }}>{cls.description}</p>
@@ -273,7 +401,7 @@ export default function OnlineClasses() {
                       <div style={{ display: 'flex', gap: '8px', marginLeft: '20px' }}>
                         {cls.status === 'scheduled' && (
                           <button
-                            onClick={() => startClass(cls.id)}
+                            onClick={() => startClass(cls._id)}
                             style={{
                               background: '#4caf50',
                               color: 'white',
@@ -291,7 +419,7 @@ export default function OnlineClasses() {
                         )}
                         {cls.status === 'live' && (
                           <button
-                            onClick={() => endClass(cls.id)}
+                            onClick={() => endClass(cls._id)}
                             style={{
                               background: '#f44336',
                               color: 'white',
@@ -307,20 +435,27 @@ export default function OnlineClasses() {
                             <FaStop /> End
                           </button>
                         )}
-                        <button
+                        <a
+                          href={cls.meetingLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           style={{
                             background: '#2196f3',
                             color: 'white',
                             border: 'none',
                             padding: '8px 12px',
                             borderRadius: '6px',
-                            cursor: 'pointer'
+                            cursor: 'pointer',
+                            textDecoration: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
                           }}
                         >
-                          <FaEdit />
-                        </button>
+                          <FaVideo /> Join
+                        </a>
                         <button
-                          onClick={() => deleteClass(cls.id)}
+                          onClick={() => deleteClass(cls._id)}
                           style={{
                             background: '#f44336',
                             color: 'white',
@@ -334,12 +469,9 @@ export default function OnlineClasses() {
                         </button>
                       </div>
                     </div>
-                    {cls.meetingLink && (
+                    {cls.accessCode && (
                       <div style={{ marginTop: '12px', padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
-                        <strong>Meeting Link:</strong> 
-                        <a href={cls.meetingLink} target="_blank" rel="noopener noreferrer" style={{ marginLeft: '8px', color: '#1a237e' }}>
-                          {cls.meetingLink}
-                        </a>
+                        <strong>Access Code:</strong> {cls.accessCode}
                       </div>
                     )}
                   </div>
@@ -400,8 +532,8 @@ export default function OnlineClasses() {
               <div>
                 <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>Class *</label>
                 <select
-                  name="class"
-                  value={formData.class}
+                  name="className"
+                  value={formData.className}
                   onChange={handleInputChange}
                   required
                   style={{
@@ -414,7 +546,7 @@ export default function OnlineClasses() {
                 >
                   <option value="">Select Class</option>
                   {classOptions.map(cls => (
-                    <option key={cls} value={cls}>{cls}</option>
+                    <option key={cls} value={cls}>Class {cls}</option>
                   ))}
                 </select>
               </div>
@@ -427,6 +559,7 @@ export default function OnlineClasses() {
                   value={formData.date}
                   onChange={handleInputChange}
                   required
+                  min={new Date().toISOString().split('T')[0]}
                   style={{
                     width: '100%',
                     padding: '12px',
@@ -515,32 +648,34 @@ export default function OnlineClasses() {
                   fontSize: '16px',
                   resize: 'vertical'
                 }}
-                placeholder="Brief description of the class content and objectives..."
+                placeholder="Brief description of the class content..."
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', marginTop: '30px' }}>
+            <div style={{ marginTop: '30px', display: 'flex', gap: '12px' }}>
               <button
                 type="submit"
+                disabled={loading}
                 style={{
                   background: '#1a237e',
                   color: 'white',
                   border: 'none',
                   padding: '12px 24px',
                   borderRadius: '6px',
-                  cursor: 'pointer',
+                  cursor: loading ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
-                  fontWeight: '500'
+                  fontWeight: '500',
+                  opacity: loading ? 0.6 : 1
                 }}
               >
-                Create Class
+                {loading ? 'Creating...' : 'Create Class'}
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('dashboard')}
                 style={{
                   background: '#f5f5f5',
-                  color: '#666',
+                  color: '#333',
                   border: '1px solid #ddd',
                   padding: '12px 24px',
                   borderRadius: '6px',

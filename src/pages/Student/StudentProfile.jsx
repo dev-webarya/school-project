@@ -9,17 +9,13 @@ export default function StudentProfile() {
 
   const normalizeProfile = (raw) => {
     if (!raw || typeof raw !== 'object') return null;
-    const personal = raw.personal_info || raw.personalInfo || {};
-    const academic = raw.academic_info || raw.academicInfo || {};
-    const contacts = raw.parent_contact || raw.guardian || raw.contacts || {};
-
     return {
-      name: raw.name || personal.name || 'Unknown',
-      class: raw.class || academic.class || academic.className || '-',
-      rollNo: raw.rollNo || academic.rollNo || raw.admissionNumber || '-',
-      email: raw.email || personal.email || '-',
-      phone: raw.phone || personal.phone || '-',
-      guardian: contacts.name || raw.guardianName || '-',
+      name: raw.user?.name || raw.name || 'Unknown',
+      class: raw.class || '-',
+      rollNo: raw.rollNumber || raw.rollNo || raw.admissionNumber || '-',
+      email: raw.user?.email || raw.email || '-',
+      phone: raw.user?.phone || raw.phone || '-',
+      guardian: raw.guardian?.name || raw.guardianName || '-',
     };
   };
 

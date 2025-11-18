@@ -3,6 +3,7 @@ import { FaSearch, FaPlus, FaEdit, FaEye, FaDownload, FaFilter, FaMoneyBillWave,
 import { useAuth } from '../../contexts/AuthContext';
 import config from '../../config/config.js';
 import { adminAPI } from '../../services/api.js';
+import './FeeManagement.css';
 
 export default function FeeManagement() {
   const { user } = useAuth();
@@ -52,9 +53,63 @@ export default function FeeManagement() {
     { value: 'card', label: 'Card' }
   ];
 
+  const toModelClass = (value) => {
+    const map = {
+      NS: 'NS',
+      LKG: 'LKG',
+      UKG: 'UKG',
+      '1st': '1',
+      '2nd': '2',
+      '3rd': '3',
+      '4th': '4',
+      '5th': '5',
+      '6th': '6',
+      '7th': '7',
+      '8th': '8',
+      '9th': '9',
+      '10th': '10',
+      '11th': '11',
+      '12th': '12'
+    };
+    return map[value] || value;
+  };
+
+  const fromModelClass = (value) => {
+    const reverse = {
+      Nursery: 'NS',
+      LKG: 'LKG',
+      UKG: 'UKG',
+      '1': '1st',
+      '2': '2nd',
+      '3': '3rd',
+      '4': '4th',
+      '5': '5th',
+      '6': '6th',
+      '7': '7th',
+      '8': '8th',
+      '9': '9th',
+      '10': '10th',
+      '11': '11th',
+      '12': '12th'
+    };
+    return reverse[String(value)] || value;
+  };
+
   useEffect(() => {
     fetchData();
   }, [activeTab, filters, searchTerm, currentPage]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') setShowModal(false);
+    };
+    if (showModal) {
+      window.addEventListener('keydown', onKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showModal]);
 
   const fetchData = async () => {
     try {
@@ -65,7 +120,7 @@ export default function FeeManagement() {
           page: currentPage,
           limit: 10,
           ...(filters.academicYear && { academicYear: filters.academicYear }),
-          ...(filters.class && { class: filters.class }),
+          ...(filters.class && { class: toModelClass(filters.class) }),
           ...(filters.status && { status: filters.status }),
           ...(searchTerm && { search: searchTerm })
         }
@@ -109,8 +164,37 @@ export default function FeeManagement() {
         booksFee: 0,
         miscellaneousFee: 0
       },
-      paymentSchedule: 'quarterly'
+      paymentSchedule: 'yearly'
     });
+    setShowModal(true);
+  };
+
+  const handleEditFeeStructure = (structure) => {
+    setModalType('feeStructure');
+    setSelectedItem(structure);
+    setFormData({
+      class: fromModelClass(structure.class),
+      academicYear: structure.academicYear,
+      feeComponents: structure.feeComponents || {
+        tuitionFee: 0,
+        admissionFee: 0,
+        developmentFee: 0,
+        examFee: 0,
+        libraryFee: 0,
+        sportsFee: 0,
+        transportFee: 0,
+        uniformFee: 0,
+        booksFee: 0,
+        miscellaneousFee: 0
+      },
+      paymentSchedule: structure.paymentSchedule || 'yearly'
+    });
+    setShowModal(true);
+  };
+
+  const handleViewFeeStructure = (structure) => {
+    setModalType('viewStructure');
+    setSelectedItem(structure);
     setShowModal(true);
   };
 
@@ -137,7 +221,25 @@ export default function FeeManagement() {
   const handleSubmit = async () => {
     try {
       if (modalType === 'feeStructure') {
-        await adminAPI.createFeeStructure(formData);
+        const yearPattern = /^\d{4}-\d{4}$/;
+        if (!formData.class) {
+          alert('Please select Class');
+          return;
+        }
+        if (!formData.academicYear || !yearPattern.test(String(formData.academicYear))) {
+          alert('Academic Year must be in format YYYY-YYYY');
+          return;
+        }
+        if (!formData.feeComponents || isNaN(Number(formData.feeComponents.tuitionFee))) {
+          alert('Please enter a valid Tuition Fee');
+          return;
+        }
+        if (!formData.paymentSchedule) {
+          alert('Please select Payment Schedule');
+          return;
+        }
+        const payload = { ...formData, class: toModelClass(formData.class) };
+        await adminAPI.createFeeStructure(payload);
       } else if (modalType === 'payment') {
         await adminAPI.recordPayment(formData);
       }
@@ -183,24 +285,24 @@ export default function FeeManagement() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="loader">
+        <div className="spinner"></div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
-      <div className="max-w-7xl mx-auto">
+    <div className="fee-management">
+      <div className="container">
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Fee Management</h1>
-          <p className="text-gray-600">Manage fee structures, payments, and dues</p>
+        <div className="page-header">
+          <h1 className="page-title">Fee Management</h1>
+          <p className="page-subtitle">Manage fee structures, payments, and dues</p>
         </div>
 
         {/* Tab Navigation */}
-        <div className="mb-6">
-          <nav className="flex space-x-8">
+        <div className="tabs">
+          <nav className="tabs-nav">
             {['overview', 'payments', 'dues'].map((tab) => (
               <button
                 key={tab}
@@ -208,11 +310,7 @@ export default function FeeManagement() {
                   setActiveTab(tab);
                   setCurrentPage(1);
                 }}
-                className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === tab
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
+                className={`tab ${activeTab === tab ? 'active' : ''}`}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
               </button>
@@ -222,65 +320,45 @@ export default function FeeManagement() {
 
         {/* Overview Tab */}
         {activeTab === 'overview' && data.type === 'overview' && (
-          <div className="space-y-6">
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-lg shadow-sm border">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-green-100">
-                    <FaMoneyBillWave className="h-6 w-6 text-green-600" />
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-500">Total Collection</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {formatCurrency(data.summary?.totalCollection)}
-                    </p>
-                  </div>
+          <div className="sections">
+            <div className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-icon stat-icon--green">
+                  <FaMoneyBillWave className="icon" />
+                </div>
+                <div className="stat-content">
+                  <p className="stat-label">Total Collection</p>
+                  <p className="stat-value">{formatCurrency(data.summary?.totalCollection)}</p>
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-lg shadow-sm border">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-red-100">
-                    <FaCalendarAlt className="h-6 w-6 text-red-600" />
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-500">Pending Amount</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {formatCurrency(data.summary?.totalPendingAmount)}
-                    </p>
-                  </div>
+              <div className="stat-card">
+                <div className="stat-icon stat-icon--red">
+                  <FaCalendarAlt className="icon" />
+                </div>
+                <div className="stat-content">
+                  <p className="stat-label">Pending Amount</p>
+                  <p className="stat-value">{formatCurrency(data.summary?.totalPendingAmount)}</p>
                 </div>
               </div>
 
-              <div className="bg-white p-6 rounded-lg shadow-sm border">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-blue-100">
-                    <FaUsers className="h-6 w-6 text-blue-600" />
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-500">Fee Structures</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {data.feeStructures?.length || 0}
-                    </p>
-                  </div>
+              <div className="stat-card">
+                <div className="stat-icon stat-icon--blue">
+                  <FaUsers className="icon" />
+                </div>
+                <div className="stat-content">
+                  <p className="stat-label">Fee Structures</p>
+                  <p className="stat-value">{data.feeStructures?.length || 0}</p>
                 </div>
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex space-x-4">
-              <button
-                onClick={handleCreateFeeStructure}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center space-x-2"
-              >
+            <div className="actions">
+              <button onClick={handleCreateFeeStructure} className="btn btn-primary">
                 <FaPlus />
                 <span>Create Fee Structure</span>
               </button>
-              <button
-                onClick={handleRecordPayment}
-                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center space-x-2"
-              >
+              <button onClick={handleRecordPayment} className="btn btn-success">
                 <FaMoneyBillWave />
                 <span>Record Payment</span>
               </button>
@@ -328,10 +406,10 @@ export default function FeeManagement() {
                           {structure.paymentSchedule.replace('_', ' ').toUpperCase()}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button className="text-blue-600 hover:text-blue-900 mr-3">
+                          <button className="text-blue-600 hover:text-blue-900 mr-3" onClick={() => handleViewFeeStructure(structure)}>
                             <FaEye />
                           </button>
-                          <button className="text-green-600 hover:text-green-900">
+                          <button className="text-green-600 hover:text-green-900" onClick={() => handleEditFeeStructure(structure)}>
                             <FaEdit />
                           </button>
                         </td>
@@ -739,12 +817,15 @@ export default function FeeManagement() {
 
         {/* Modal */}
         {showModal && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-              <div className="mt-3">
-                <h3 className="text-lg font-medium text-gray-900 mb-4">
-                  {modalType === 'feeStructure' ? 'Create Fee Structure' : 'Record Payment'}
+          <div className="modal-overlay" onClick={() => setShowModal(false)}>
+            <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h3 className="modal-title">
+                  {modalType === 'feeStructure' ? 'Create Fee Structure' : (modalType === 'payment' ? 'Record Payment' : 'Fee Structure Details')}
                 </h3>
+                <button className="modal-close" aria-label="Close" onClick={() => setShowModal(false)}>×</button>
+              </div>
+              <div className="modal-content">
                 
                 {modalType === 'feeStructure' && (
                   <div className="space-y-4">
@@ -799,6 +880,53 @@ export default function FeeManagement() {
                         required
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Payment Schedule *
+                      </label>
+                      <select
+                        value={formData.paymentSchedule}
+                        onChange={(e) => setFormData(prev => ({ ...prev, paymentSchedule: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                        required
+                      >
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="half_yearly">Half Yearly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {modalType === 'viewStructure' && selectedItem && (
+                  <div className="space-y-4">
+                    <div>
+                      <strong>Class:</strong> {selectedItem.class}
+                    </div>
+                    <div>
+                      <strong>Academic Year:</strong> {selectedItem.academicYear}
+                    </div>
+                    <div>
+                      <strong>Payment Schedule:</strong> {String(selectedItem.paymentSchedule).replace('_', ' ')}
+                    </div>
+                    <div>
+                      <strong>Total Amount:</strong> {formatCurrency(selectedItem.totalAmount || (selectedItem.feeComponents ? Object.values(selectedItem.feeComponents).reduce((s,v)=>s+Number(v||0),0) : 0))}
+                    </div>
+                    {selectedItem.feeComponents && (
+                      <div>
+                        <strong>Components:</strong>
+                        <div className="components-grid" style={{ marginTop: '8px' }}>
+                          {Object.entries(selectedItem.feeComponents).map(([key, val]) => (
+                            <div className="component-item" key={key}>
+                              <span className="component-name">{key.replace('_',' ')}</span>
+                              <span className="component-amount">{formatCurrency(val)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -863,19 +991,16 @@ export default function FeeManagement() {
                   </div>
                 )}
 
-                <div className="flex justify-end space-x-3 mt-6">
-                  <button
-                    onClick={() => setShowModal(false)}
-                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
-                  >
+                <div className="modal-actions">
+                  <button onClick={() => setShowModal(false)} className="btn btn-secondary">
                     Cancel
                   </button>
-                  <button
-                    onClick={handleSubmit}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                  {modalType !== 'viewStructure' && (
+                  <button onClick={handleSubmit} className="btn btn-primary"
                   >
-                    {modalType === 'feeStructure' ? 'Create Structure' : 'Record Payment'}
+                    {modalType === 'feeStructure' ? (selectedItem ? 'Update Structure' : 'Create Structure') : 'Record Payment'}
                   </button>
+                  )}
                 </div>
               </div>
             </div>

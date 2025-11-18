@@ -2,8 +2,9 @@
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
-  background: var(--bg-primary, #ffffff);
+  background: var(--bg-primary, #0f0f10);
   min-height: 100vh;
+  color-scheme: dark;
 }
 
 .assignment-header {
@@ -79,16 +80,21 @@
   padding: 12px 16px;
   border: 1px solid var(--border-color, #e1e5e9);
   border-radius: 8px;
-  background: var(--bg-primary, #ffffff);
-  color: var(--text-primary, #2c3e50);
+  background: #1a1a1b;
+  color: #e6e6e6;
   font-size: 14px;
   transition: all 0.2s ease;
 }
 
 .filter-select:focus {
   outline: none;
-  border-color: var(--primary-color, #3498db);
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+  border-color: #2d7dd2;
+  box-shadow: 0 0 0 2px rgba(45, 125, 210, 0.25);
+}
+
+.filter-select option {
+  background-color: #1f1f20;
+  color: #f0f0f0;
 }
 
 /* Modal Styles */
@@ -181,8 +187,8 @@
   padding: 12px 16px;
   border: 1px solid var(--border-color, #e1e5e9);
   border-radius: 8px;
-  background: var(--bg-primary, #ffffff);
-  color: var(--text-primary, #2c3e50);
+  background: #1a1a1b;
+  color: #e6e6e6;
   font-size: 14px;
   transition: all 0.2s ease;
   box-sizing: border-box;
@@ -192,8 +198,8 @@
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: var(--primary-color, #3498db);
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+  border-color: #2d7dd2;
+  box-shadow: 0 0 0 2px rgba(45, 125, 210, 0.25);
 }
 
 .form-group textarea {
@@ -274,6 +280,24 @@
 
 .btn-delete:hover {
   background: var(--danger-hover, #c0392b);
+}
+
+.btn-complete {
+  background: var(--success-color, #27ae60);
+  color: white;
+  padding: 8px 16px;
+  font-size: 12px;
+}
+
+.btn-complete:hover {
+  background: #1e8e4c;
+}
+
+.btn-complete.disabled,
+.btn-complete:disabled {
+  opacity: 0.6;
+  cursor: default;
+  background: #2c6f49;
 }
 
 /* Assignment Grid */
@@ -374,17 +398,22 @@
   border-color: var(--primary-color, #3498db);
 }
 
-.faculty-info h3 {
-  color: var(--text-primary, #2c3e50);
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin: 0 0 10px 0;
+.faculty-fields {
+  display: block;
 }
 
-.faculty-info p {
-  margin: 5px 0;
-  color: var(--text-secondary, #6c757d);
-  font-size: 14px;
+.faculty-fields p {
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.field-label {
+  color: var(--text-primary, #eaeaea);
+  font-weight: 600;
+}
+
+.field-value {
+  color: var(--text-secondary, #c0c0c0);
 }
 
 .faculty-info strong {

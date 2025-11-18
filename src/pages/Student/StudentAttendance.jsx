@@ -13,13 +13,11 @@ export default function StudentAttendance() {
         setLoading(true);
         setError('');
         const res = await studentAPI.getAttendance();
-        const data = res.data?.data;
-        // Expect backend to return array in future; currently may be placeholder
-        const list = Array.isArray(data) ? data : [];
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
         const mapped = list.map(r => ({
-          date: r.date || r.attendanceDate || '',
-          subject: r.subject || r.course || '-',
-          status: r.status || 'Present'
+          date: r.date,
+          class: r.course?.class || '-',
+          status: r.status
         }));
         setRecords(mapped);
       } catch (err) {
@@ -40,7 +38,7 @@ export default function StudentAttendance() {
   return (
     <div className="container" style={{ padding: '100px 0' }}>
       <h1>Attendance Status</h1>
-      <p>View your daily attendance status across subjects.</p>
+      <p>View your daily attendance status.</p>
 
       {loading && <div>Loading attendance...</div>}
       {error && !loading && <div style={{ color: 'red' }}>Error: {error}</div>}
@@ -59,7 +57,7 @@ export default function StudentAttendance() {
           <thead>
             <tr>
               <th style={{ textAlign: 'left', padding: '12px', borderBottom: '1px solid #eee' }}>Date</th>
-              <th style={{ textAlign: 'left', padding: '12px', borderBottom: '1px solid #eee' }}>Subject</th>
+              <th style={{ textAlign: 'left', padding: '12px', borderBottom: '1px solid #eee' }}>Class</th>
               <th style={{ textAlign: 'left', padding: '12px', borderBottom: '1px solid #eee' }}>Status</th>
             </tr>
           </thead>

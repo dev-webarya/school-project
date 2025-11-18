@@ -14,28 +14,12 @@ export default function StudentGrades() {
     const fetchPublishedGrades = async () => {
       try {
         setLoading(true);
-        if (E2E) {
-          const token = localStorage.getItem('authToken');
-          const res = await fetch(`${API_BASE}/grades/student/S001`, {
-            headers: {
-              'Authorization': token ? `Bearer ${token}` : ''
-            }
-          });
-          const data = await res.json();
-          if (data?.success) {
-            setGrades(data.data || []);
-            setError(null);
-          } else {
-            setError(data?.message || 'Failed to fetch grades');
-          }
-        } else {
-          const { data } = await studentAPI.getGrades();
-          setGrades(data?.data || []);
-          setError(null);
-        }
+        const { data } = await studentAPI.getGrades();
+        setGrades(data?.data || []);
+        setError(null);
       } catch (err) {
         console.error('Student grades fetch error:', err);
-        setError('Failed to load grades');
+        setError(err.response?.data?.message || 'Failed to load grades');
       } finally {
         setLoading(false);
       }

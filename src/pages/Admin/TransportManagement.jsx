@@ -15,6 +15,9 @@ import {
 } from 'react-icons/fa';
 
 export default function TransportManagement() {
+  // E2E toggle: switch between real and E2E endpoints
+  const E2E = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_E2E_MODE === 'true');
+  const TRANSPORT_BASE = E2E ? '/e2e/transport' : '/transport';
   const [activeTab, setActiveTab] = useState('routes');
   const [routes, setRoutes] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -54,22 +57,53 @@ export default function TransportManagement() {
   });
 
   useEffect(() => {
+    loadData();
+  }, []);
+
+  useEffect(() => {
     fetchData();
   }, [activeTab]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [routesRes, vehiclesRes, allocationsRes] = await Promise.all([
+        api.get(`${TRANSPORT_BASE}/routes`),
+        api.get(`${TRANSPORT_BASE}/vehicles`),
+        api.get(`${TRANSPORT_BASE}/allocations`)
+      ]);
+
+      const routesData = routesRes.data;
+      if (routesData.success) setRoutes(routesData.data);
+
+      const vehiclesData = vehiclesRes.data;
+      if (vehiclesData.success) setVehicles(vehiclesData.data);
+
+      const allocationsData = allocationsRes.data;
+      if (allocationsData.success) setAllocations(allocationsData.data);
+
+      setError('');
+    } catch (error) {
+      console.error('Error loading data:', error);
+      setError(error.userMessage || 'Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchData = async () => {
     try {
       setLoading(true);
       if (activeTab === 'routes') {
-        const response = await api.get('/transport/routes');
+        const response = await api.get(`${TRANSPORT_BASE}/routes`);
         const data = response.data;
         if (data.success) setRoutes(data.data);
       } else if (activeTab === 'vehicles') {
-        const response = await api.get('/transport/vehicles');
+        const response = await api.get(`${TRANSPORT_BASE}/vehicles`);
         const data = response.data;
         if (data.success) setVehicles(data.data);
       } else if (activeTab === 'allocations') {
-        const response = await api.get('/transport/allocations');
+        const response = await api.get(`${TRANSPORT_BASE}/allocations`);
         const data = response.data;
         if (data.success) setAllocations(data.data);
       }
@@ -82,23 +116,21 @@ export default function TransportManagement() {
     }
   };
 
-  const handleSubmit = async (e) => {
+  async function handleSave(e) {
     e.preventDefault();
     try {
-      let response;
-      if (activeTab === 'routes') {
-        response = editingItem
-          ? await api.put(`/transport/routes/${editingItem._id}`, newRoute)
-          : await api.post('/transport/routes', newRoute);
-      } else if (activeTab === 'vehicles') {
-        response = editingItem
-          ? await api.put(`/transport/vehicles/${editingItem._id}`, newVehicle)
-          : await api.post('/transport/vehicles', newVehicle);
-      } else if (activeTab === 'allocations') {
-        response = editingItem
-          ? await api.put(`/transport/allocations/${editingItem._id}`, newAllocation)
-          : await api.post('/transport/allocations', newAllocation);
-      }
+      const response =
+        activeTab === 'routes'
+          ? (editingItem
+              ? await api.put(`${TRANSPORT_BASE}/routes/${editingItem._id}`, newRoute)
+              : await api.post(`${TRANSPORT_BASE}/routes`, newRoute))
+          : activeTab === 'vehicles'
+          ? (editingItem
+              ? await api.put(`${TRANSPORT_BASE}/vehicles/${editingItem._id}`, newVehicle)
+              : await api.post(`${TRANSPORT_BASE}/vehicles`, newVehicle))
+          : (editingItem
+              ? await api.put(`${TRANSPORT_BASE}/allocations/${editingItem._id}`, newAllocation)
+              : await api.post(`${TRANSPORT_BASE}/allocations`, newAllocation));
 
       const data = response.data;
       if (data.success) {
@@ -114,20 +146,19 @@ export default function TransportManagement() {
       console.error('Error saving:', error);
       setError(error.userMessage || 'Failed to save');
     }
-  };
+  }
 
-  const handleDelete = async (id) => {
+  async function handleDelete(id) {
     if (!window.confirm('Are you sure you want to delete this item?')) return;
 
     try {
-      let response;
-      if (activeTab === 'routes') {
-        response = await api.delete(`/transport/routes/${id}`);
-      } else if (activeTab === 'vehicles') {
-        response = await api.delete(`/transport/vehicles/${id}`);
-      } else if (activeTab === 'allocations') {
-        response = await api.delete(`/transport/allocations/${id}`);
-      }
+      const currentTab = activeTab;
+      const response =
+        currentTab === 'routes'
+          ? await api.delete(`${TRANSPORT_BASE}/routes/${id}`)
+          : currentTab === 'vehicles'
+          ? await api.delete(`${TRANSPORT_BASE}/vehicles/${id}`)
+          : await api.delete(`${TRANSPORT_BASE}/allocations/${id}`);
 
       const data = response.data;
       if (data.success) {
@@ -140,7 +171,7 @@ export default function TransportManagement() {
       console.error('Error deleting:', error);
       setError(error.userMessage || 'Failed to delete');
     }
-  };
+  }
 
   const resetForm = () => {
     setNewRoute({
@@ -177,28 +208,28 @@ export default function TransportManagement() {
         routeName: item.routeName,
         startLocation: item.startLocation,
         endLocation: item.endLocation,
-        stops: item.stops,
-        distance: item.distance.toString(),
-        estimatedTime: item.estimatedTime.toString(),
-        fare: item.fare.toString()
+        stops: Array.isArray(item.stops) ? item.stops.map(s => s.stopName || s) : [],
+        distance: String(item.distance ?? item.totalDistance ?? ''),
+        estimatedTime: String(item.estimatedTime ?? item.estimatedDuration ?? ''),
+        fare: String(item.fare ?? (Array.isArray(item.stops) ? (item.stops[0]?.pickupFee ?? '') : ''))
       });
     } else if (activeTab === 'vehicles') {
       setNewVehicle({
         vehicleNumber: item.vehicleNumber,
         vehicleType: item.vehicleType,
-        capacity: item.capacity.toString(),
-        driverName: item.driverName,
-        driverPhone: item.driverPhone,
-        routeId: item.routeId?._id || item.routeId || ''
+        capacity: String(item.capacity ?? ''),
+        driverName: item.driver?.name || item.driverName || '',
+        driverPhone: item.driver?.phone || item.driverPhone || '',
+        routeId: item.route?._id || item.routeId?._id || item.routeId || ''
       });
     } else if (activeTab === 'allocations') {
       setNewAllocation({
-        studentId: item.studentId?._id || item.studentId || '',
-        routeId: item.routeId?._id || item.routeId || '',
-        vehicleId: item.vehicleId?._id || item.vehicleId || '',
+        studentId: item.student?._id || item.studentId?._id || item.studentId || '',
+        routeId: item.route?._id || item.routeId?._id || item.routeId || '',
+        vehicleId: item.vehicle?._id || item.vehicleId?._id || item.vehicleId || '',
         pickupStop: item.pickupStop,
         dropStop: item.dropStop,
-        fare: item.fare.toString()
+        fare: String(item.fare ?? item.monthlyFee ?? '')
       });
     }
     setShowModal(true);
@@ -233,15 +264,36 @@ export default function TransportManagement() {
         searchFields.push(item.vehicleNumber, item.driverName, item.vehicleType);
       } else if (activeTab === 'allocations') {
         searchFields.push(
-          item.studentId?.name || '',
-          item.routeId?.routeName || '',
-          item.vehicleId?.vehicleNumber || ''
+          item.student?.name || item.studentId?.name || '',
+          item.student?.studentId || item.studentId || '',
+          item.route?.routeName || item.routeId?.routeName || '',
+          item.vehicle?.vehicleNumber || item.vehicleId?.vehicleNumber || ''
         );
       }
       return searchFields.some(field => 
         field.toLowerCase().includes(searchTerm.toLowerCase())
       );
     });
+  };
+
+  const getRouteFare = (route) => {
+    if (Array.isArray(route.stops) && route.stops.length) {
+      const entry = route.stops.find(s => s && s.pickupFee !== undefined && s.pickupFee !== null);
+      const num = Number(entry?.pickupFee);
+      if (Number.isFinite(num)) return num;
+    }
+    const fallback = Number(route.baseFare ?? route.fare);
+    return Number.isFinite(fallback) ? fallback : 0;
+  };
+
+  const formatINR = (amount) => {
+    try {
+      const num = Number(amount);
+      if (!Number.isFinite(num)) return '₹0';
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(num);
+    } catch (_) {
+      return '₹0';
+    }
   };
 
   return (
@@ -316,12 +368,14 @@ export default function TransportManagement() {
                       <FaMapMarkerAlt /> {route.startLocation} → {route.endLocation}
                     </div>
                     <div className="route-details">
-                      <span><FaClock /> {route.estimatedTime} min</span>
-                      <span>₹{route.fare}</span>
-                      <span>{route.distance} km</span>
+                      <span><FaClock /> {(route.estimatedTime ?? route.estimatedDuration) ?? '-'} min</span>
+                      <span>{formatINR(getRouteFare(route))}</span>
+                      <span>{(route.distance ?? route.totalDistance) ?? '-'} km</span>
                     </div>
                     <div className="stops">
-                      <strong>Stops:</strong> {route.stops.join(', ')}
+                      <strong>Stops:</strong> {Array.isArray(route.stops) && route.stops.length > 0 
+                        ? route.stops.map(s => (s?.stopName || s?.name || s?.title || s || '')).filter(Boolean).join(', ')
+                        : [route.startLocation, route.endLocation].filter(Boolean).join(', ') || '-'}
                     </div>
                   </div>
                 </div>
@@ -348,13 +402,13 @@ export default function TransportManagement() {
                     <div className="vehicle-type">{vehicle.vehicleType}</div>
                     <div className="capacity">Capacity: {vehicle.capacity} students</div>
                     <div className="driver-info">
-                      <strong>Driver:</strong> {vehicle.driverName}
+                      <strong>Driver:</strong> {vehicle.driver?.name || '-'}
                       <br />
-                      <strong>Phone:</strong> {vehicle.driverPhone}
+                      <strong>Phone:</strong> {vehicle.driver?.phone || '-'}
                     </div>
-                    {vehicle.routeId && (
+                    {(vehicle.route || vehicle.routeId) && (
                       <div className="assigned-route">
-                        <strong>Route:</strong> {vehicle.routeId.routeName || vehicle.routeId}
+                        <strong>Route:</strong> {(vehicle.route?.routeName) || (vehicle.routeId?.routeName) || vehicle.routeId || '-'}
                       </div>
                     )}
                   </div>
@@ -380,12 +434,12 @@ export default function TransportManagement() {
                 <tbody>
                   {getFilteredData().map((allocation) => (
                     <tr key={allocation._id}>
-                      <td>{allocation.studentId?.name || allocation.studentId}</td>
-                      <td>{allocation.routeId?.routeName || allocation.routeId}</td>
-                      <td>{allocation.vehicleId?.vehicleNumber || allocation.vehicleId}</td>
+                      <td>{[allocation.student?.name || allocation.studentId?.name, allocation.student?.studentId || allocation.studentId].filter(Boolean).join(' - ') || '-'}</td>
+                      <td>{allocation.route?.routeName || allocation.routeId?.routeName || ''}</td>
+                      <td>{allocation.vehicle?.vehicleNumber || allocation.vehicleId?.vehicleNumber || ''}</td>
                       <td>{allocation.pickupStop}</td>
                       <td>{allocation.dropStop}</td>
-                      <td>₹{allocation.fare}</td>
+                      <td>{formatINR(allocation.fare ?? allocation.monthlyFee ?? 0)}</td>
                       <td>
                         <div className="table-actions">
                           <button onClick={() => handleEdit(allocation)} className="edit-btn">
@@ -423,7 +477,7 @@ export default function TransportManagement() {
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="modal-form">
+            <form onSubmit={handleSave} className="modal-form">
               {activeTab === 'routes' && (
                 <>
                   <div className="form-group">

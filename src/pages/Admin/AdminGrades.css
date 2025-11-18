@@ -1,0 +1,37 @@
+.admin-grades-page { padding: 24px; }
+.page-title { font-size: 24px; font-weight: 700; margin: 8px 0 12px; }
+.muted { color: #6b7280; margin-top: -4px; }
+
+.section-card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 24px; }
+.section-title { font-size: 18px; font-weight: 600; }
+.info-text { color: #374151; margin: 6px 0 12px; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid-span-2 { grid-column: 1 / span 2; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; }
+
+label span { display: block; font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+input, select { padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: #f9fafb; }
+input:focus, select:focus { outline: none; border-color: #60a5fa; box-shadow: 0 0 0 3px rgba(96,165,250,0.25); background: #fff; }
+
+.btn { padding: 10px 16px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-weight: 600; }
+.btn-primary { background: #2563eb; color: #fff; }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-secondary { background: #f3f4f6; color: #111827; border-color: #e5e7eb; }
+.btn-secondary:hover { background: #e5e7eb; }
+
+.recent-grades { margin-top: 32px; }
+.list-header { display: flex; align-items: center; justify-content: space-between; }
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+
+.grades-table { width: 100%; border-collapse: collapse; }
+.grades-table thead th { text-align: left; padding: 10px; border-bottom: 2px solid #e5e7eb; background: #f9fafb; color: #374151; font-weight: 600; }
+.grades-table tbody td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
+.grades-table tbody tr:hover { background: #f9fafb; }
+.empty { padding: 12px; color: #6b7280; }
+
+.badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+.badge-success { background: #ecfdf5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge-neutral { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.badge-grade { background: #e3f2fd; color: #1e3a8a; border: 1px solid #93c5fd; }
+.badge-muted { background: #f3f4f6; color: #6b7280; border: 1px solid #d1d5db; }

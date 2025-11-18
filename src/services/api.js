@@ -3,8 +3,9 @@ import config from '../config/config.js';
 
 // Base API configuration
 // Force dev to use Vite proxy (`/api`) to avoid direct localhost calls
+// Ignore VITE_API_BASE_URL in development to prevent cross-port issues
 const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.DEV)
-  ? (import.meta.env?.VITE_API_BASE_URL || '/api')
+  ? '/api'
   : config.API_BASE_URL;
 
 // Loading state management
@@ -31,7 +32,7 @@ const notifyLoadingChange = () => {
 // Create axios instance with default config
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000, // Increased timeout
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -39,7 +40,6 @@ const api = axios.create({
 
 // Helpful dev log to confirm base URL routing
 if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
-  // eslint-disable-next-line no-console
   console.log('[API] Base URL (dev):', API_BASE_URL);
 }
 
@@ -63,7 +63,7 @@ api.interceptors.request.use(
 
     return config;
   },
-  (error) => {
+  async (error) => {
     return Promise.reject(error);
   }
 );
@@ -78,14 +78,14 @@ api.interceptors.response.use(
     }
 
     // Log performance in development
-    if (process.env.NODE_ENV === 'development' && response.config.metadata?.startTime) {
+    if (typeof import.meta !== 'undefined' && import.meta.env?.DEV && response.config.metadata?.startTime) {
       const duration = Date.now() - response.config.metadata.startTime;
       console.log(`API Request: ${response.config.method?.toUpperCase()} ${response.config.url} - ${duration}ms`);
     }
 
     return response;
   },
-  (error) => {
+  async (error) => {
     // Remove request from loading tracker
     if (error.config?.metadata?.requestId) {
       loadingRequests.delete(error.config.metadata.requestId);
@@ -94,12 +94,29 @@ api.interceptors.response.use(
 
     // Enhanced error handling
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      // In E2E mode, do not clear or redirect to avoid interfering with tests
+      const originalRequest = error.config;
+      if (!originalRequest?._retry) {
+        const rt = localStorage.getItem('refreshToken');
+        if (rt) {
+          try {
+            originalRequest._retry = true;
+            const res = await api.post('/auth/refresh', { refreshToken: rt });
+            const newToken = res.data?.data?.token;
+            const newRefresh = res.data?.data?.refreshToken;
+            if (newToken) {
+              localStorage.setItem('authToken', newToken);
+              if (newRefresh) localStorage.setItem('refreshToken', newRefresh);
+              originalRequest.headers = originalRequest.headers || {};
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              return api(originalRequest);
+            }
+          } catch (_) { void 0; }
+        }
+      }
       if (!config.IS_E2E) {
         localStorage.removeItem('authToken');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('userRole');
-        // Redirect to app root to ensure consistent routing in production
         window.location.href = '/';
       }
     }
@@ -136,7 +153,7 @@ const getUserFriendlyErrorMessage = (error) => {
     case 401:
       return 'Authentication required. Please log in again.';
     case 403:
-      return 'You do not have permission to perform this action.';
+      return (message || 'You do not have permission to perform this action.') + detailString;
     case 404:
       return 'The requested resource was not found.';
     case 409:
@@ -247,6 +264,8 @@ export const adminAPI = {
   // Grades
   createGrade: (gradeData, config) => api.post('/admin/grades', gradeData, config),
   getGrades: (params = {}, config = {}) => api.get('/admin/grades', { params, ...config }),
+  // NEW: minimal subject creation (Course with defaults)
+  createSimpleSubject: (payload, config) => api.post('/admin/subjects/simple', payload, config),
 };
 
 // Student API calls
@@ -257,21 +276,40 @@ export const studentAPI = {
   getAttendance: () => api.get('/student/attendance'),
   getGrades: () => api.get('/student/grades'),
   getFees: () => api.get('/student/fees'),
-  payFees: (paymentData) => api.post('/student/fees/pay', paymentData),
-  getClasses: () => api.get('/student/classes'),
+  payFees: (paymentData) => api.post('/student/fees/payment', paymentData),
+  getFeeStructures: (params = {}) => api.get('/student/fees/structures', { params }),
+  getClasses: () => api.get('/student/courses'),
+  getOnlineClasses: (params = {}) => api.get('/student/online-classes', { params }),
+  joinOnlineClass: (id) => api.post(`/student/online-classes/${id}/join`),
+  getAssignments: (params = {}) => api.get('/student/assignments', { params }),
+  submitAssignment: (id, payload) => api.post(`/student/assignments/${id}/submit`, payload),
 };
 
 // Faculty API calls
 export const facultyAPI = {
-  getDashboard: () => api.get('/faculty/dashboard'),
+  getDashboard: (params = {}) => api.get('/faculty/dashboard', { params }),
   getProfile: () => api.get('/faculty/profile'),
   updateProfile: (profileData) => api.put('/faculty/profile', profileData),
   getClasses: () => api.get('/faculty/classes'),
+  getCourses: (params = {}) => api.get('/faculty/courses', { params }),
+  createCourse: (courseData) => api.post('/faculty/courses', courseData),
+  getAssignments: (params = {}) => api.get('/faculty/assignments', { params }),
+  createAssignment: (payload) => api.post('/faculty/assignments', payload),
+  getAssignmentSubmissions: (id, params = {}) => api.get(`/faculty/assignments/${id}/submissions`, { params }),
+  // Admin-assigned teaching assignments for the logged-in faculty
+  getTeachingAssignments: (params = {}) => api.get('/faculty/teaching-assignments', { params }),
   getStudents: () => api.get('/faculty/students'),
   markAttendance: (attendanceData) => api.post('/faculty/attendance', attendanceData),
   // Fetch attendance records with optional query parameters
   // params can include: course, student, date_from, date_to, session
   getAttendance: (params = {}) => api.get('/faculty/attendance', { params }),
+  // Online Classes Management
+  getOnlineClasses: (params = {}) => api.get('/faculty/online-classes', { params }),
+  createOnlineClass: (classData) => api.post('/faculty/online-classes', classData),
+  updateOnlineClass: (id, classData) => api.put(`/faculty/online-classes/${id}`, classData),
+  deleteOnlineClass: (id) => api.delete(`/faculty/online-classes/${id}`),
+  updateOnlineClassStatus: (id, status) => api.patch(`/faculty/online-classes/${id}/status`, { status }),
+  deleteCourse: (id, config) => api.delete(`/faculty/courses/${id}`, config),
 };
  
 
@@ -303,9 +341,20 @@ export const generalAPI = {
   createNotice: (noticeData, config) => api.post('/general/notices', noticeData, config),
   updateNotice: (id, noticeData, config) => api.put(`/general/notices/${id}`, noticeData, config),
   deleteNotice: (id, config) => api.delete(`/general/notices/${id}`, config),
-  getEvents: () => api.get('/general/events'),
+  // Fetch public academic events with optional filters
+  // Example: generalAPI.getEvents({ eventType: 'Administrative' })
+  getEvents: (params = {}) => api.get('/general/events', { params }),
   // Public subjects (basic info only)
   getPublicSubjects: (params = {}) => api.get('/general/subjects/public', { params }),
+};
+
+// Admin Calendar API calls (manage AcademicCalendar)
+export const calendarAPI = {
+  getEvents: (params = {}, config = {}) => api.get('/calendar', { params, ...config }),
+  getEventById: (id, config = {}) => api.get(`/calendar/${id}`, { ...config }),
+  createEvent: (eventData, config = {}) => api.post('/calendar', eventData, { ...config }),
+  updateEvent: (id, eventData, config = {}) => api.put(`/calendar/${id}`, eventData, { ...config }),
+  deleteEvent: (id, config = {}) => api.delete(`/calendar/${id}`, { ...config }),
 };
 
 export default api;

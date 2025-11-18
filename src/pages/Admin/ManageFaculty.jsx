@@ -45,13 +45,13 @@ export default function ManageFaculty() {
       } else {
         const msg = response.data?.message || 'Failed to fetch faculty data';
         setError(msg);
-        showNotification(msg, 'error');
+        showError(msg);
       }
     } catch (error) {
       console.error('Error fetching faculty:', error);
       const msg = error.userMessage || 'Failed to connect to server';
       setError(msg);
-      showNotification(msg, 'error');
+      showError(msg);
     } finally {
       setLoading(false);
     }

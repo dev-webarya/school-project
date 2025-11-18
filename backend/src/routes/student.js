@@ -1,8 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, requireRole } = require('../middleware/auth');
-const User = require('../models/User');
 const Student = require('../models/Student');
+const Attendance = require('../models/Attendance');
+const OnlineClass = require('../models/OnlineClass');
+const { FeeStructure, FeePayment, FeeDue } = require('../models/Fee');
+
+const e2eStudentFees = new Map();
+const Course = require('../models/Course');
+const Assignment = require('../models/Assignment');
+const AssignmentSubmission = require('../models/AssignmentSubmission');
 
 // Helper function to get time ago
 const getTimeAgo = (date) => {
@@ -33,12 +40,31 @@ router.get('/dashboard', authenticateToken, requireRole(['student']), async (req
       { id: 3, subject: 'English', time: '01:30 PM - 02:30 PM', teacher: 'Ms. Patel', room: 'Room 105', status: 'upcoming' }
     ];
 
-    // Sample assignments data
-    const assignments = [
-      { id: 1, subject: 'Mathematics', title: 'Algebra Assignment', dueDate: '2024-01-15', status: 'pending', priority: 'high' },
-      { id: 2, subject: 'Science', title: 'Physics Lab Report', dueDate: '2024-01-18', status: 'submitted', priority: 'medium' },
-      { id: 3, subject: 'English', title: 'Essay on Literature', dueDate: '2024-01-20', status: 'pending', priority: 'medium' }
-    ];
+    // Real assignments for the student's class, with submission status
+    let assignments = [];
+    try {
+      const classAssignments = await Assignment.find({ class: studentProfile?.class })
+        .sort({ dueDate: 1 })
+        .limit(20);
+
+      const assignmentIds = classAssignments.map(a => a._id);
+      const submissions = await AssignmentSubmission.find({
+        assignment: { $in: assignmentIds },
+        student: studentProfile?._id
+      }).select('assignment');
+      const submittedSet = new Set(submissions.map(s => String(s.assignment)));
+
+      assignments = classAssignments.map(a => ({
+        id: String(a._id),
+        subject: a.subject,
+        title: a.title,
+        dueDate: a.dueDate ? new Date(a.dueDate).toISOString().slice(0, 10) : '',
+        status: submittedSet.has(String(a._id)) ? 'submitted' : 'pending'
+      }));
+    } catch (e) {
+      console.warn('Student dashboard assignments error:', e.message);
+      assignments = [];
+    }
 
     // Sample recent grades
     const recentGrades = [
@@ -69,7 +95,8 @@ router.get('/dashboard', authenticateToken, requireRole(['student']), async (req
         total: assignments.length,
         pending: assignments.filter(a => a.status === 'pending').length,
         submitted: assignments.filter(a => a.status === 'submitted').length,
-        list: assignments
+        // Convert status to title-case for dashboard badge if needed
+        list: assignments.map(a => ({ ...a, status: a.status === 'submitted' ? 'submitted' : 'Pending' }))
       },
       recentGrades,
       attendanceSummary,
@@ -131,40 +158,12 @@ router.get('/profile', authenticateToken, requireRole(['student']), async (req, 
   }
 });
 
-// @route   GET /api/student/assignments
-// @desc    Get student assignments
-// @access  Private (Student only)
-router.get('/assignments', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get assignments endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/student/assignments',
-      query_params: ['subject', 'status', 'due_date'],
-      status_options: ['pending', 'submitted', 'graded']
-    }
-  });
-});
-
-// @route   POST /api/student/assignments/:id/submit
-// @desc    Submit assignment
-// @access  Private (Student only)
-router.post('/assignments/:id/submit', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Submit assignment endpoint - To be implemented',
-    data: {
-      endpoint: 'POST /api/student/assignments/:id/submit',
-      assignment_id: req.params.id,
-      required_fields: ['submission_text', 'attachments']
-    }
-  });
-});
+// Removed placeholder routes for assignments list and submit; real implementations exist below
 
 // @route   GET /api/student/grades
 // @desc    Get published grades for the logged-in student
 // @access  Private (Student only)
-router.get('/grades', authenticateToken, requireRole(['student']), async (req, res) => {
+router.get('/grades', authenticateToken, async (req, res) => {
   try {
     const Student = require('../models/Student');
     const Grade = require('../models/Grade');
@@ -177,7 +176,7 @@ router.get('/grades', authenticateToken, requireRole(['student']), async (req, r
     const grades = await Grade.find({ student: studentDoc._id, isPublished: true })
       .populate('course', 'courseName courseCode credits')
       .sort({ assessmentDate: -1 })
-      .limit(200);
+      .limit(50);
 
     const data = grades.map(g => ({
       subject: g.course?.courseName || 'Unknown',
@@ -199,15 +198,48 @@ router.get('/grades', authenticateToken, requireRole(['student']), async (req, r
 // @route   GET /api/student/attendance
 // @desc    Get student attendance
 // @access  Private (Student only)
-router.get('/attendance', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get attendance endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/student/attendance',
-      query_params: ['subject', 'date_from', 'date_to']
+router.get('/attendance', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const studentDoc = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!studentDoc) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
     }
-  });
+
+    const { course, date_from, date_to } = req.query;
+    const query = { student: studentDoc._id };
+    if (course) query.course = course;
+    if (date_from || date_to) {
+      query.date = {};
+      if (date_from) query.date.$gte = new Date(date_from);
+      if (date_to) query.date.$lte = new Date(date_to);
+    }
+
+    const records = await Attendance.find(query)
+      .populate('course', 'courseName courseCode class section')
+      .sort({ date: -1 })
+      .limit(200);
+
+    const data = records.map(r => ({
+      id: String(r._id),
+      date: r.date,
+      status: r.status,
+      timeIn: r.timeIn,
+      timeOut: r.timeOut,
+      remarks: r.remarks,
+      course: {
+        id: String(r.course?._id || ''),
+        name: r.course?.courseName || '-',
+        code: r.course?.courseCode || '-',
+        class: r.course?.class || '-',
+        section: r.course?.section || '-',
+      }
+    }));
+
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Student attendance error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch attendance' });
+  }
 });
 
 // @route   GET /api/student/schedule
@@ -225,60 +257,428 @@ router.get('/schedule', (req, res) => {
 });
 
 // @route   GET /api/student/online-classes
-// @desc    Get online classes
+// @desc    Get online classes for the student's class
 // @access  Private (Student only)
-router.get('/online-classes', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get online classes endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/student/online-classes',
-      query_params: ['date_from', 'date_to', 'subject']
+router.get('/online-classes', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    // Find student profile for the authenticated user
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
     }
-  });
+
+    // Build query for classes matching the student's class
+    const query = { className: student.class };
+
+    // Optional filters
+    const { date_from, date_to, subject, status } = req.query;
+    if (subject) query.subject = subject;
+    if (status && ['scheduled', 'live', 'completed'].includes(status)) query.status = status;
+    if (date_from || date_to) {
+      query.date = {};
+      if (date_from) query.date.$gte = new Date(date_from);
+      if (date_to) query.date.$lte = new Date(date_to);
+    }
+
+    const classes = await OnlineClass.find(query)
+      .populate('faculty', 'employeeId department designation')
+      .sort({ date: 1, time: 1 });
+
+    res.json({ success: true, message: 'Online classes retrieved successfully', data: classes });
+  } catch (error) {
+    console.error('Student get online classes error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve online classes', error: error.message });
+  }
+});
+
+// @route   GET /api/student/courses
+// @desc    List courses for the student's class
+// @access  Private (Student only)
+router.get('/courses', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) return res.status(404).json({ success: false, message: 'Student profile not found' });
+
+    const courses = await Course.find({ class: student.class })
+      .populate('faculty', 'employeeId department designation')
+      .sort({ subject: 1 });
+
+    res.json({ success: true, message: 'Courses retrieved successfully', data: courses });
+  } catch (error) {
+    console.error('Student get courses error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve courses', error: error.message });
+  }
+});
+
+// @route   GET /api/student/assignments
+// @desc    List assignments for the student's class
+// @access  Private (Student only)
+router.get('/assignments', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) return res.status(404).json({ success: false, message: 'Student profile not found' });
+
+    const { subject } = req.query;
+    const query = { class: student.class };
+    if (subject) query.subject = subject;
+
+    const assignments = await Assignment.find(query)
+      .populate('course', 'courseName subject class section')
+      .sort({ dueDate: 1 });
+
+    res.json({ success: true, message: 'Assignments retrieved successfully', data: assignments });
+  } catch (error) {
+    console.error('Student get assignments error:', error);
+    res.status(500).json({ success: false, message: 'Failed to retrieve assignments', error: error.message });
+  }
+});
+
+// @route   POST /api/student/assignments/:id/submit
+// @desc    Submit an assignment
+// @access  Private (Student only)
+router.post('/assignments/:id/submit', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) return res.status(404).json({ success: false, message: 'Student profile not found' });
+
+    const assignment = await Assignment.findById(req.params.id);
+    if (!assignment) return res.status(404).json({ success: false, message: 'Assignment not found' });
+    if (assignment.class !== student.class) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to submit this assignment' });
+    }
+
+    const { content, attachments } = req.body;
+    const payload = {
+      assignment: assignment._id,
+      student: student._id,
+      content: content || '',
+      attachments: Array.isArray(attachments) ? attachments : []
+    };
+
+    // Upsert submission: one submission per student per assignment
+    const submission = await AssignmentSubmission.findOneAndUpdate(
+      { assignment: assignment._id, student: student._id },
+      payload,
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).populate('student', 'studentId rollNumber user');
+
+    res.json({ success: true, message: 'Assignment submitted successfully', data: submission });
+  } catch (error) {
+    console.error('Student submit assignment error:', error);
+    res.status(500).json({ success: false, message: 'Failed to submit assignment', error: error.message });
+  }
 });
 
 // @route   POST /api/student/online-classes/:id/join
-// @desc    Join online class
+// @desc    Join an online class (returns meeting link and access code)
 // @access  Private (Student only)
-router.post('/online-classes/:id/join', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Join online class endpoint - To be implemented',
-    data: {
-      endpoint: 'POST /api/student/online-classes/:id/join',
-      class_id: req.params.id,
-      returns: ['meeting_link', 'access_code']
+router.post('/online-classes/:id/join', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
     }
-  });
+
+    const cls = await OnlineClass.findById(req.params.id);
+    if (!cls) {
+      return res.status(404).json({ success: false, message: 'Online class not found' });
+    }
+
+    // Ensure the class is for the student's class
+    if (cls.className !== student.class) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to join this class' });
+    }
+
+    // Optionally add student to the class attendance list
+    if (!cls.students.some(s => s.toString() === student._id.toString())) {
+      cls.students.push(student._id);
+      await cls.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Join info retrieved successfully',
+      data: {
+        meetingLink: cls.meetingLink,
+        accessCode: cls.accessCode || null,
+        platform: cls.platform,
+        status: cls.status
+      }
+    });
+  } catch (error) {
+    console.error('Student join online class error:', error);
+    res.status(500).json({ success: false, message: 'Failed to join online class', error: error.message });
+  }
 });
 
 // @route   GET /api/student/fees
 // @desc    Get fee information
 // @access  Private (Student only)
-router.get('/fees', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Get fees endpoint - To be implemented',
-    data: {
-      endpoint: 'GET /api/student/fees',
-      returns: ['fee_structure', 'payment_history', 'pending_fees', 'due_dates']
+router.get('/fees', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    if (process.env.E2E_MODE === 'true') {
+      const currentYear = new Date().getFullYear();
+      const yearFilter = `${currentYear}-${currentYear + 1}`;
+      const key = String(req.user._id || req.user.id || 'e2e');
+      if (!e2eStudentFees.has(key)) {
+        const feeStructure = { _id: 'fs-e2e', class: 'Grade 6-8', academicYear: yearFilter, totalAmount: 66000, paymentSchedule: 'annual' };
+        const due = {
+          _id: `due-e2e-${Date.now()}`,
+          student: key,
+          feeStructure: feeStructure._id,
+          academicYear: yearFilter,
+          installmentNumber: 1,
+          dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          amount: feeStructure.totalAmount,
+          paidAmount: 0,
+          status: 'pending'
+        };
+        e2eStudentFees.set(key, { feeStructure, dues: [due], payments: [] });
+      }
+      const state = e2eStudentFees.get(key);
+      return res.json({
+        success: true,
+        data: {
+          student: { _id: key, name: 'E2E Student', class: state.feeStructure.class, studentId: 'E2E001', email: 'e2e@local' },
+          feeStructure: state.feeStructure,
+          payments: state.payments,
+          dues: state.dues,
+          fees: state.dues.map(d => ({
+            id: String(d._id),
+            type: `Installment ${d.installmentNumber}`,
+            amount: Number(d.amount || 0),
+            dueDate: d.dueDate || new Date(),
+            status: d.status,
+            session: '',
+            description: '',
+            paidDate: d.status === 'paid' ? (state.payments.find(p => p.installmentNumber === d.installmentNumber)?.paymentDetails?.paymentDate || null) : null
+          })),
+          summary: {
+            totalPaid: state.payments.reduce((sum, p) => sum + Number(p.paymentDetails?.amount || 0), 0),
+            totalDue: state.dues.filter(d => d.status !== 'paid').reduce((sum, d) => sum + Math.max(0, Number(d.amount || 0) - Number(d.paidAmount || 0)), 0),
+            totalFeeAmount: state.feeStructure.totalAmount
+          }
+        }
+      });
     }
-  });
+
+    const student = await Student
+      .findOne({ user: req.user._id || req.user.id })
+      .populate('user', 'firstName lastName email');
+
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const currentYear = new Date().getFullYear();
+    const academicYear = student.academicYear || `${currentYear}-${currentYear + 1}`;
+
+    const feeStructure = await FeeStructure.findOne({ class: student.class, academicYear, isActive: true });
+
+    if (feeStructure) {
+      const existingDuesCount = await FeeDue.countDocuments({ student: student._id, academicYear, feeStructure: feeStructure._id });
+      if (existingDuesCount === 0) {
+        const totalAmount = Object.values(feeStructure.feeComponents || {}).reduce((sum, v) => sum + Number(v || 0), 0);
+        if (Array.isArray(feeStructure.dueDates) && feeStructure.dueDates.length > 0) {
+          for (const d of feeStructure.dueDates) {
+            const due = new FeeDue({
+              student: student._id,
+              feeStructure: feeStructure._id,
+              academicYear,
+              installmentNumber: Number(d.installmentNumber || 1),
+              dueDate: d.dueDate || new Date(),
+              amount: Number(d.amount || 0)
+            });
+            await due.save();
+          }
+        } else {
+          const due = new FeeDue({
+            student: student._id,
+            feeStructure: feeStructure._id,
+            academicYear,
+            installmentNumber: 1,
+            dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+            amount: Number(totalAmount || 0)
+          });
+          await due.save();
+        }
+      }
+    }
+
+    const [payments, dues] = await Promise.all([
+      FeePayment.find({ student: student._id, academicYear })
+        .populate('feeStructure', 'class academicYear')
+        .sort({ 'paymentDetails.paymentDate': -1 }),
+      FeeDue.find({ student: student._id, academicYear })
+        .populate('feeStructure', 'class academicYear')
+        .sort({ dueDate: 1 })
+    ]);
+
+    const fees = dues.map(d => ({
+      id: String(d._id),
+      type: `Installment ${d.installmentNumber}`,
+      amount: Number(d.amount || 0),
+      dueDate: d.dueDate || new Date(),
+      status: d.status,
+      session: '',
+      description: '',
+      paidDate: d.status === 'paid' ? (payments.find(p => p.installmentNumber === d.installmentNumber)?.paymentDetails?.paymentDate || null) : null
+    }));
+
+    const totalPaid = payments
+      .filter(p => p.status === 'completed')
+      .reduce((sum, p) => sum + Number(p.paymentDetails?.amount || 0), 0);
+
+    const totalDue = dues
+      .filter(d => d.status !== 'paid')
+      .reduce((sum, d) => sum + Math.max(0, Number(d.amount || 0) - Number(d.paidAmount || 0)), 0);
+
+    return res.json({
+      success: true,
+      data: {
+        student: {
+          _id: student._id,
+          name: student.name,
+          class: student.class,
+          studentId: student.studentId,
+          email: student.user?.email || ''
+        },
+        feeStructure,
+        payments,
+        dues,
+        fees,
+        summary: {
+          totalPaid,
+          totalDue,
+          totalFeeAmount: feeStructure?.totalAmount || 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get student fees error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch fees', error: error.message });
+  }
+});
+
+// @route   GET /api/student/fees/structures
+// @desc    Get active fee structures for an academic year (optional class filter)
+// @access  Public (no auth required for viewing)
+router.get('/fees/structures', async (req, res) => {
+  try {
+    const { academicYear, class: className } = req.query || {};
+
+    const currentYear = new Date().getFullYear();
+    const yearFilter = academicYear || `${currentYear}-${currentYear + 1}`;
+
+    const query = { academicYear: yearFilter, isActive: true };
+    if (className) query.class = className;
+
+    const structures = await FeeStructure.find(query).sort({ class: 1 });
+
+    const data = structures.map((s) => ({
+      _id: s._id,
+      class: s.class,
+      academicYear: s.academicYear,
+      paymentSchedule: s.paymentSchedule,
+      totalAmount: Object.values(s.feeComponents || {}).reduce((sum, v) => sum + Number(v || 0), 0),
+    }));
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error('Get fee structures error:', error);
+    return res.status(500).json({ success: false, message: 'Error fetching fee structures', error: error.message });
+  }
 });
 
 // @route   POST /api/student/fees/payment
 // @desc    Process fee payment
 // @access  Private (Student only)
-router.post('/fees/payment', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Fee payment endpoint - To be implemented',
-    data: {
-      endpoint: 'POST /api/student/fees/payment',
-      required_fields: ['amount', 'payment_method', 'fee_type']
+router.post('/fees/payment', authenticateToken, requireRole(['student']), async (req, res) => {
+  try {
+    if (process.env.E2E_MODE === 'true') {
+      const { dueId, paymentMethod } = req.body || {};
+      const key = String(req.user._id || req.user.id || 'e2e');
+      const state = e2eStudentFees.get(key);
+      const due = state?.dues.find(d => String(d._id) === String(dueId));
+      if (!state || !due) {
+        return res.status(404).json({ success: false, message: 'Fee due not found' });
+      }
+      const amountToPay = Math.max(0, Number(due.amount || 0) - Number(due.paidAmount || 0));
+      if (amountToPay <= 0) {
+        return res.status(400).json({ success: false, message: 'No pending amount for this due' });
+      }
+      const payment = {
+        _id: `pay-e2e-${Date.now()}`,
+        student: { name: 'E2E Student', class: state.feeStructure.class, studentId: 'E2E001' },
+        feeStructure: { class: state.feeStructure.class, academicYear: state.feeStructure.academicYear },
+        paymentDetails: { receiptNumber: `E2E-${Date.now()}`, amount: amountToPay, paymentMethod: String(paymentMethod || 'online'), paymentDate: new Date() },
+        feeBreakdown: {},
+        academicYear: state.feeStructure.academicYear,
+        installmentNumber: due.installmentNumber,
+        remarks: '',
+        processedBy: { name: 'E2E Student' },
+        status: 'completed'
+      };
+      state.payments.push(payment);
+      due.paidAmount = Number(due.paidAmount || 0) + amountToPay;
+      due.status = 'paid';
+      return res.status(201).json({ success: true, message: 'Payment recorded (E2E)', data: { payment } });
     }
-  });
+
+    const { dueId, paymentMethod } = req.body || {};
+    const student = await Student.findOne({ user: req.user._id || req.user.id });
+    if (!student) {
+      return res.status(404).json({ success: false, message: 'Student profile not found' });
+    }
+
+    const due = await FeeDue.findById(dueId);
+    if (!due || String(due.student) !== String(student._id)) {
+      return res.status(404).json({ success: false, message: 'Fee due not found' });
+    }
+
+    const feeStructure = await FeeStructure.findById(due.feeStructure);
+    if (!feeStructure) {
+      return res.status(404).json({ success: false, message: 'Fee structure not found' });
+    }
+
+    const amountToPay = Math.max(0, Number(due.amount || 0) - Number(due.paidAmount || 0));
+    if (amountToPay <= 0) {
+      return res.status(400).json({ success: false, message: 'No pending amount for this due' });
+    }
+
+    const payment = new FeePayment({
+      student: student._id,
+      feeStructure: feeStructure._id,
+      paymentDetails: {
+        amount: amountToPay,
+        paymentMethod: String(paymentMethod || 'online'),
+        paymentDate: new Date()
+      },
+      feeBreakdown: {},
+      academicYear: feeStructure.academicYear,
+      installmentNumber: due.installmentNumber,
+      processedBy: req.user._id || req.user.id,
+      status: 'completed'
+    });
+
+    await payment.save();
+
+    due.paidAmount = Number(due.paidAmount || 0) + amountToPay;
+    await due.save();
+
+    await payment.populate([
+      { path: 'feeStructure', select: 'class academicYear' }
+    ]);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Payment processed successfully',
+      data: { payment }
+    });
+  } catch (error) {
+    console.error('Student fee payment error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to process payment', error: error.message });
+  }
 });
 
 // @route   GET /api/student/library

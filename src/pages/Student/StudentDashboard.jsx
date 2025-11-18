@@ -11,6 +11,7 @@ export default function StudentDashboard() {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [attendancePercent, setAttendancePercent] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -36,6 +37,21 @@ export default function StudentDashboard() {
     }
   };
 
+  useEffect(() => {
+    const fetchAttendanceSummary = async () => {
+      try {
+        const res = await studentAPI.getAttendance();
+        const list = Array.isArray(res.data?.data) ? res.data.data : [];
+        const total = list.length;
+        const presentCount = list.filter(r => r.status === 'Present' || r.status === 'Late').length;
+        setAttendancePercent(total > 0 ? Math.round((presentCount / total) * 100) : 0);
+      } catch (err) {
+        console.error('Student attendance summary error:', err);
+      }
+    };
+    fetchAttendanceSummary();
+  }, []);
+
   if (loading) {
     return (
       <div className="container" style={{ padding: '40px 0', textAlign: 'center' }}>
@@ -57,7 +73,6 @@ export default function StudentDashboard() {
     );
   }
 
-  const upcomingClasses = dashboardData?.todaysClasses || [];
   const assignments = dashboardData?.assignments?.list || [];
 
   return (
@@ -115,7 +130,7 @@ export default function StudentDashboard() {
              <FaCalendarCheck />
            </div>
            <h3 style={{ margin: '0 0 5px 0', fontSize: '1.5rem', color: '#333' }}>
-             {dashboardData?.attendanceSummary?.percentage || '0'}%
+             {attendancePercent ?? dashboardData?.attendanceSummary?.percentage ?? '0'}%
            </h3>
            <p style={{ margin: '0', color: '#666', fontSize: '0.9rem' }}>Attendance</p>
          </div>
@@ -330,46 +345,7 @@ export default function StudentDashboard() {
         </Link>
       </div>
 
-      {/* Today's Classes */}
-      <div style={{
-        background: 'white',
-        borderRadius: '8px',
-        padding: '20px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.08)',
-        marginBottom: '20px'
-      }}>
-        <h2 style={{ margin: '0 0 15px 0', fontSize: '1.2rem' }}>Today's Classes</h2>
-        <div>
-          {upcomingClasses.map(cls => (
-            <div key={cls.id} style={{ 
-              padding: '15px', 
-              borderRadius: '6px',
-              border: '1px solid #f0f0f0',
-              marginBottom: '10px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <h3 style={{ margin: '0', fontSize: '1.1rem', color: '#1a237e' }}>{cls.subject}</h3>
-                <span style={{ 
-                  fontSize: '0.8rem', 
-                  padding: '3px 8px', 
-                  borderRadius: '4px',
-                  background: '#e8f5e9',
-                  color: '#2e7d32'
-                }}>
-                  {cls.time}
-                </span>
-              </div>
-              <div style={{ 
-                marginTop: '10px',
-                color: '#666',
-                fontSize: '0.9rem'
-              }}>
-                <span>Teacher: {cls.teacher}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+      
 
       {/* Pending Assignments */}
       <div style={{

@@ -6,6 +6,9 @@ const Faculty = require('../models/Faculty');
 const Course = require('../models/Course');
 const Subject = require('../models/Subject');
 const Admission = require('../models/Admission');
+const AcademicCalendar = require('../models/AcademicCalendar');
+const Notice = require('../models/Notice');
+const { authenticateToken, requireRole } = require('../middleware/auth');
 
 // Health check endpoint
 router.get('/health', (req, res) => {
@@ -160,12 +163,174 @@ router.get('/subjects/public', async (req, res) => {
   }
 });
 
+// Public academic notices
+router.get('/notices', async (req, res) => {
+  try {
+    const { category, from, to } = req.query;
+    const query = { isActive: true };
+    if (category) query.category = category;
+    if (from || to) {
+      query.effectiveDate = {};
+      if (from) query.effectiveDate.$gte = new Date(from);
+      if (to) query.effectiveDate.$lte = new Date(to);
+    }
+    const notices = await Notice.find(query).sort({ effectiveDate: -1 });
+    res.json({ success: true, data: notices });
+  } catch (error) {
+    console.error('Error fetching notices:', error);
+    res.status(500).json({ success: false, message: 'Error fetching notices' });
+  }
+});
+
+// Admin-only create/update/delete for notices
+router.post('/notices', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const doc = await Notice.create({ ...payload, createdBy: req.user.id });
+    res.status(201).json({ success: true, data: doc });
+  } catch (error) {
+    console.error('Create notice error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create notice' });
+  }
+});
+
+router.put('/notices/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const updated = await Notice.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    if (!updated) return res.status(404).json({ success: false, message: 'Notice not found' });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Update notice error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update notice' });
+  }
+});
+
+router.delete('/notices/:id', authenticateToken, requireRole(['admin']), async (req, res) => {
+  try {
+    const updated = await Notice.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+    if (!updated) return res.status(404).json({ success: false, message: 'Notice not found' });
+    res.json({ success: true, message: 'Notice deleted' });
+  } catch (error) {
+    console.error('Delete notice error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete notice' });
+  }
+});
+
+// Public academic events backed by AcademicCalendar
+router.get('/events', async (req, res) => {
+  try {
+    const { startDate, endDate, eventType } = req.query;
+    const query = { isActive: true };
+    // Public visibility: include events targeted to broad audiences
+    // Previously restricted to only 'All'. Broaden to common audiences so
+    // Admin-created events for Students/Parents/Faculty are visible publicly.
+    query.targetAudience = { $in: ['All', 'Students', 'Parents', 'Faculty'] };
+    if (eventType) query.eventType = eventType;
+    if (startDate || endDate) {
+      const start = startDate ? new Date(startDate) : new Date(0);
+      const end = endDate ? new Date(endDate) : new Date('2999-12-31');
+      query.$or = [
+        { startDate: { $gte: start, $lte: end } },
+        { endDate: { $gte: start, $lte: end } },
+        { startDate: { $lte: start }, endDate: { $gte: end } },
+      ];
+    }
+    const events = await AcademicCalendar.find(query).sort({ startDate: 1 });
+    res.json({ success: true, data: events });
+  } catch (error) {
+    console.error('Error fetching public events:', error);
+    res.status(500).json({ success: false, message: 'Error fetching events' });
+  }
+});
+
 // Public admissions submission
 router.post('/admissions', async (req, res) => {
   try {
     const payload = req.body || {};
     // Generate applicationNumber if not provided
     const applicationNumber = payload.applicationNumber || `APP-${Date.now()}`;
+
+    // Normalize incoming payload to align with Admission schema
+    // 1) Map grade aliases (e.g., 'NS' -> 'Nursery') and ensure valid class values
+    const VALID_CLASSES = ['Nursery', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+    const incomingClass = payload.academicInfo?.applyingForClass;
+    let normalizedClass = incomingClass;
+    if (typeof incomingClass === 'string') {
+      const trimmed = incomingClass.trim();
+      if (/^ns$/i.test(trimmed) || /^nursery$/i.test(trimmed)) {
+        normalizedClass = 'Nursery';
+      } else if (VALID_CLASSES.includes(trimmed)) {
+        normalizedClass = trimmed;
+      }
+    }
+    if (!normalizedClass) {
+      normalizedClass = '1';
+    }
+    payload.academicInfo = {
+      ...(payload.academicInfo || {}),
+      applyingForClass: normalizedClass
+    };
+
+    // 2) Provide default mother name to satisfy schema requirement
+    //    The public form collects a single parent/guardian name; use a placeholder if mother not provided.
+    const existingMother = payload.parentInfo?.mother || {};
+    const motherName = existingMother.name || 'Not Provided';
+    payload.parentInfo = {
+      ...(payload.parentInfo || {}),
+      mother: {
+        ...existingMother,
+        name: motherName
+      }
+    };
+
+    const normalizeDigits = (s) => (typeof s === 'string' ? s.replace(/\D/g, '') : '');
+    if (typeof payload.studentInfo?.gender === 'string') {
+      payload.studentInfo.gender = payload.studentInfo.gender.toLowerCase();
+    }
+    const mainPhone = normalizeDigits(payload.contactInfo?.phone);
+    if (mainPhone.length !== 10) {
+      return res.status(400).json({ success: false, message: 'Invalid phone number' });
+    }
+    const altPhone = normalizeDigits(payload.contactInfo?.alternatePhone);
+    const addressObj = payload.contactInfo?.address || {};
+    const pinDigits = normalizeDigits(addressObj.pincode);
+    if (pinDigits.length !== 6) {
+      return res.status(400).json({ success: false, message: 'Invalid pincode' });
+    }
+    const fatherPhone = normalizeDigits(payload.parentInfo?.father?.phone);
+    if (fatherPhone.length !== 10) {
+      return res.status(400).json({ success: false, message: 'Invalid father phone number' });
+    }
+    const motherPhone = normalizeDigits(payload.parentInfo?.mother?.phone);
+    const guardianPhone = normalizeDigits(payload.parentInfo?.guardian?.phone);
+    payload.contactInfo = {
+      ...(payload.contactInfo || {}),
+      phone: mainPhone,
+      alternatePhone: altPhone.length === 10 ? altPhone : undefined,
+      address: { ...addressObj, pincode: pinDigits }
+    };
+    payload.parentInfo = {
+      ...(payload.parentInfo || {}),
+      father: { ...(payload.parentInfo?.father || {}), phone: fatherPhone },
+      mother: { ...(payload.parentInfo?.mother || {}), phone: motherPhone.length === 10 ? motherPhone : undefined },
+      guardian: { ...(payload.parentInfo?.guardian || {}), phone: guardianPhone.length === 10 ? guardianPhone : undefined }
+    };
+    const ayRaw = payload.academicInfo?.academicYear;
+    let ayNorm = ayRaw;
+    if (typeof ayRaw === 'string') {
+      const mShort = ayRaw.match(/^(\d{4})-(\d{2})$/);
+      const mFull = ayRaw.match(/^(\d{4})-(\d{4})$/);
+      if (mShort) {
+        const start = parseInt(mShort[1], 10);
+        ayNorm = `${mShort[1]}-${start + 1}`;
+      } else if (mFull) {
+        ayNorm = ayRaw;
+      }
+    }
+    payload.academicInfo = {
+      ...(payload.academicInfo || {}),
+      academicYear: ayNorm || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`
+    };
 
     // Basic required fields check to give clearer errors to the UI
     const required = [
@@ -198,6 +363,36 @@ router.post('/admissions', async (req, res) => {
         paymentDetails: payload.feeInfo?.paymentDetails ?? {}
       }
     });
+
+    // In E2E mode, mirror this admission into the E2E in-memory store
+    // so Admin Dashboard and Enrollment Waitlist reflect live submissions.
+    try {
+      if (process.env.E2E_MODE === 'true') {
+        const e2ePayload = {
+          applicationNumber: doc.applicationNumber,
+          status: doc.status,
+          studentInfo: {
+            fullName: doc.studentInfo?.fullName || doc.studentInfo?.name || '',
+            name: doc.studentInfo?.name || doc.studentInfo?.fullName || ''
+          },
+          academicInfo: {
+            applyingForClass: doc.academicInfo?.applyingForClass || ''
+          },
+          submittedAt: doc.createdAt || new Date().toISOString()
+        };
+        // Use native fetch to POST into E2E router with role header
+        await fetch(`http://localhost:${process.env.PORT || 5000}/api/e2e/admissions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-e2e-role': 'admin'
+          },
+          body: JSON.stringify(e2ePayload)
+        }).catch(() => {});
+      }
+    } catch (e2eForwardErr) {
+      console.warn('[E2E] Failed to forward admission to E2E store:', e2eForwardErr?.message);
+    }
 
     res.status(201).json({ success: true, data: doc });
   } catch (error) {
@@ -452,6 +647,55 @@ router.get('/docs', (req, res) => {
       }
     }
   });
+});
+
+router.post('/messages', async (req, res) => {
+  try {
+    const { name, email, phone, subject, message } = req.body || {};
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({ success: false, message: 'Missing required message fields' });
+    }
+
+    const when = new Date().toISOString();
+    const payload = { name, email, phone, subject, message, time: when };
+
+    try {
+      const emailService = require('../services/emailService');
+      if (emailService && emailService.transporter) {
+        await emailService.transporter.sendMail({
+          from: process.env.EMAIL_FROM || 'BBD School <no-reply@bbdschool.local>',
+          to: process.env.CONTACT_EMAIL || process.env.EMAIL_FROM || 'sunil.bbdacademy@gmail.com',
+          subject: `New contact message: ${subject}`,
+          html: `
+            <div>
+              <p><strong>Name:</strong> ${name}</p>
+              <p><strong>Email:</strong> ${email}</p>
+              <p><strong>Phone:</strong> ${phone || ''}</p>
+              <p><strong>Subject:</strong> ${subject}</p>
+              <p><strong>Message:</strong></p>
+              <p>${message}</p>
+              <p><em>Received at ${when}</em></p>
+            </div>
+          `
+        });
+      }
+      try {
+        const noticePayload = {
+          title: `Contact: ${subject}`,
+          description: `From: ${name} <${email}>${phone ? ` | ${phone}` : ''}\n\n${message}`,
+          category: 'Contact',
+          effectiveDate: new Date(),
+          priority: 'normal',
+          isActive: true
+        };
+        await Notice.create(noticePayload);
+      } catch (_) { void 0; }
+    } catch (_) { void 0; }
+
+    return res.status(201).json({ success: true, data: payload });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: 'Failed to submit message' });
+  }
 });
 
 module.exports = router;

@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken, requireRole } = require('../middleware/auth');
+const mongoose = require('mongoose');
+const { Student } = require('../models');
 const { Route, Vehicle, TransportAllocation } = require('../models/Transport');
 
 // Helpers
@@ -57,6 +59,7 @@ router.post('/routes', authenticateToken, requireRole(['admin']), async (req, re
       stops: mappedStops,
       totalDistance: Number(distance),
       estimatedDuration: Number(estimatedTime),
+      baseFare: Number(fare || 0),
       isActive: true
     });
 
@@ -91,19 +94,34 @@ router.put('/routes/:id', authenticateToken, requireRole(['admin']), async (req,
         }))
       : undefined;
 
-    const update = {
-      ...(routeName !== undefined && { routeName }),
-      ...(startLocation !== undefined && { startLocation }),
-      ...(endLocation !== undefined && { endLocation }),
-      ...(distance !== undefined && { totalDistance: Number(distance) }),
-      ...(estimatedTime !== undefined && { estimatedDuration: Number(estimatedTime) }),
-      ...(isActive !== undefined && { isActive: !!isActive }),
-      ...(mappedStops !== undefined && { stops: mappedStops })
-    };
-
-    const doc = await Route.findByIdAndUpdate(id, update, { new: true });
+    const doc = await Route.findById(id);
     if (!doc) return res.status(404).json({ success: false, message: 'Route not found' });
-    res.json({ success: true, data: doc });
+
+    if (routeName !== undefined) doc.routeName = routeName;
+    if (startLocation !== undefined) doc.startLocation = startLocation;
+    if (endLocation !== undefined) doc.endLocation = endLocation;
+    if (distance !== undefined) doc.totalDistance = Number(distance);
+    if (estimatedTime !== undefined) doc.estimatedDuration = Number(estimatedTime);
+    if (isActive !== undefined) doc.isActive = !!isActive;
+
+    if (mappedStops !== undefined) {
+      doc.stops = mappedStops;
+    } else if (fare !== undefined && Array.isArray(doc.stops)) {
+      const newFee = Number(fare || 0);
+      doc.stops = doc.stops.map(s => ({
+        stopName: s.stopName,
+        stopTime: s.stopTime,
+        coordinates: s.coordinates || {},
+        pickupFee: newFee
+      }));
+    }
+
+    if (fare !== undefined) {
+      doc.baseFare = Number(fare || 0);
+    }
+
+    await doc.save();
+    return res.json({ success: true, data: doc });
   } catch (error) {
     console.error('Transport PUT /routes/:id error:', error);
     res.status(500).json({ success: false, message: 'Failed to update route' });
@@ -244,8 +262,17 @@ router.post('/allocations', authenticateToken, requireRole(['admin']), async (re
     const startDate = now();
     const endDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
 
+    let resolvedStudent = studentId;
+    if (!mongoose.isValidObjectId(resolvedStudent)) {
+      const sDoc = await Student.findOne({ studentId: String(studentId).toUpperCase() }).select('_id');
+      if (!sDoc) {
+        return res.status(400).json({ success: false, message: 'Invalid student identifier' });
+      }
+      resolvedStudent = sDoc._id;
+    }
+
     const doc = await TransportAllocation.create({
-      student: studentId,
+      student: resolvedStudent,
       route: routeId,
       vehicle: vehicleId,
       pickupStop,
@@ -268,8 +295,21 @@ router.put('/allocations/:id', authenticateToken, requireRole(['admin']), async 
     const { id } = req.params;
     const { studentId, routeId, vehicleId, pickupStop, dropStop, fare, isActive } = req.body || {};
 
+    let studentUpdate;
+    if (studentId !== undefined) {
+      if (mongoose.isValidObjectId(studentId)) {
+        studentUpdate = studentId;
+      } else {
+        const sDoc = await Student.findOne({ studentId: String(studentId).toUpperCase() }).select('_id');
+        if (!sDoc) {
+          return res.status(400).json({ success: false, message: 'Invalid student identifier' });
+        }
+        studentUpdate = sDoc._id;
+      }
+    }
+
     const update = {
-      ...(studentId !== undefined && { student: studentId }),
+      ...(studentUpdate !== undefined && { student: studentUpdate }),
       ...(routeId !== undefined && { route: routeId }),
       ...(vehicleId !== undefined && { vehicle: vehicleId }),
       ...(pickupStop !== undefined && { pickupStop }),

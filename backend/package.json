@@ -13,7 +13,7 @@
     "lint:fix": "eslint src/ --ext .js --fix",
     "format": "prettier --write \"src/**/*.js\"",
     "build": "echo \"Production build ready\"",
-    "start:prod": "NODE_ENV=production node src/server.js"
+    "start:prod": "cross-env NODE_ENV=production node src/server.js"
   },
   "keywords": [
     "school",
@@ -45,6 +45,23 @@
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "nodemon": "^3.1.10",
+    "cross-env": "^7.0.3"
+  },
+  "eslintConfig": {
+    "env": {
+      "node": true,
+      "es2021": true
+    },
+    "parserOptions": {
+      "sourceType": "script"
+    },
+    "globals": {
+      "process": "readonly",
+      "module": "readonly",
+      "require": "readonly",
+      "__dirname": "readonly",
+      "__filename": "readonly"
+    }
   }
 }

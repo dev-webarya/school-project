@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authAPI } from '../services/api';
+import api, { authAPI } from '../services/api';
 import config from '../config/config.js';
 
 const AuthContext = createContext();
@@ -48,6 +48,7 @@ export const AuthProvider = ({ children }) => {
       } catch (error) {
         // Token is invalid, clear storage
         localStorage.removeItem('authToken');
+        localStorage.removeItem('refreshToken');
         localStorage.removeItem('userRole');
         setUser(null);
         setUserRole(null);
@@ -66,23 +67,29 @@ export const AuthProvider = ({ children }) => {
       setError(null);
       
       // Avoid logging raw credentials in production for security
-      if (process.env.NODE_ENV !== 'production') {
+      if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
         console.log('Frontend: Attempting login for role:', credentials?.role);
       }
-      const response = await authAPI.login(credentials);
-      if (process.env.NODE_ENV !== 'production') {
+      let response;
+      if (config.IS_E2E) {
+        response = await authAPI.login(credentials);
+      } else {
+        response = await authAPI.login(credentials);
+      }
+      if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
         console.log('Frontend: Login response:', response.data);
       }
       
-      const { token, user, role } = response.data.data; // Fixed: access nested data
-      if (process.env.NODE_ENV !== 'production') {
+      const { token, refreshToken, user, role } = response.data.data;
+      if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
         console.log('Frontend: Extracted data:', { token: token?.substring(0, 50) + '...', user: user?.email, role });
       }
       
       // Store auth data
       localStorage.setItem('authToken', token);
+      localStorage.setItem('refreshToken', refreshToken || '');
       localStorage.setItem('userRole', role);
-      if (process.env.NODE_ENV !== 'production') {
+      if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
         console.log('Frontend: Stored in localStorage - token:', localStorage.getItem('authToken')?.substring(0, 50) + '...', 'role:', localStorage.getItem('userRole'));
       }
       
@@ -95,8 +102,14 @@ export const AuthProvider = ({ children }) => {
       const serverMessage = error.response?.data?.message;
       const networkMessage = error.message;
       const errorMessage = error.userMessage || serverMessage || networkMessage || 'Login failed';
-      // Log a concise, readable error for troubleshooting
       console.error('Frontend: Login failed:', errorMessage);
+      try {
+        const status = error?.response?.status ?? error?.statusCode ?? 0;
+        const shouldFallback = false;
+        if (shouldFallback) {
+          /* no-op */
+        }
+      } catch (_) { void 0; }
       setError(errorMessage);
       return { success: false, error: errorMessage };
     } finally {

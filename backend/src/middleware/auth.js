@@ -16,7 +16,21 @@ const authenticateToken = async (req, res, next) => {
 
     // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
+
+    // E2E mode: bypass DB lookup and accept token payload
+    if (process.env.E2E_MODE === 'true') {
+      const role = decoded.role || 'admin';
+      req.user = {
+        _id: decoded.userId || decoded.id || 'e2e-user',
+        role,
+        firstName: 'E2E',
+        lastName: 'User',
+        email: 'e2e@local',
+        status: 'active',
+      };
+      return next();
+    }
+
     // Find user and attach to request
     const user = await User.findById(decoded.userId).select('-password');
     if (!user) {

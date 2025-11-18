@@ -35,6 +35,7 @@ export default function StudentProfile() {
   }, [id]);
 
   const profile = data?.profile;
+  const personal = profile?.personal || profile;
   const academicRecords = data?.academicRecords || [];
   const attendance = data?.attendance || [];
   const metrics = data?.performanceMetrics;
@@ -60,16 +61,16 @@ export default function StudentProfile() {
             <div className="card-header"><FaUser /> Personal Information</div>
             <div className="card-body">
               <div className="info-grid">
-                <div><strong>Name:</strong> {profile.name || 'N/A'}</div>
-                <div><strong>Email:</strong> {profile.email || 'N/A'}</div>
-                <div><strong>Phone:</strong> {profile.phone || 'N/A'}</div>
-                <div><strong>Student ID:</strong> {profile.studentId || 'N/A'}</div>
-                <div><strong>Roll No:</strong> {profile.rollNumber || 'N/A'}</div>
-                <div><strong>Class/Section:</strong> {profile.class}-{profile.section}</div>
-                <div><strong>Academic Year:</strong> {profile.academicYear}</div>
-                <div><strong>Admission Date:</strong> {profile.admissionDate ? new Date(profile.admissionDate).toLocaleDateString() : 'N/A'}</div>
-                <div><strong>DOB:</strong> {profile.dateOfBirth ? new Date(profile.dateOfBirth).toLocaleDateString() : 'N/A'}</div>
-                <div><strong>Status:</strong> {profile.status}</div>
+                <div><strong>Name:</strong> {personal?.name || 'N/A'}</div>
+                <div><strong>Email:</strong> {personal?.email || 'N/A'}</div>
+                <div><strong>Phone:</strong> {personal?.phone || 'N/A'}</div>
+                <div><strong>Student ID:</strong> {personal?.studentId || 'N/A'}</div>
+                <div><strong>Roll No:</strong> {personal?.rollNumber || 'N/A'}</div>
+                <div><strong>Class/Section:</strong> {(personal?.class || '-')}-{personal?.section || '-'}</div>
+                <div><strong>Academic Year:</strong> {personal?.academicYear || 'N/A'}</div>
+                <div><strong>Admission Date:</strong> {personal?.admissionDate ? new Date(personal.admissionDate).toLocaleDateString() : 'N/A'}</div>
+                <div><strong>DOB:</strong> {personal?.dateOfBirth ? new Date(personal.dateOfBirth).toLocaleDateString() : 'N/A'}</div>
+                <div><strong>Status:</strong> {personal?.status || 'N/A'}</div>
               </div>
             </div>
           </section>

@@ -1,11 +1,33 @@
 import { FaPhone, FaEnvelope, FaMapMarkerAlt, FaClock } from 'react-icons/fa';
 import './Contact.css';
+import api from '../../services/api';
+import config from '../../config/config';
 
 const Contact = () => {
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Form submission logic would go here
-    alert('Form submitted successfully!');
+    const form = e.target;
+    const getVal = (field) => form.elements?.[field]?.value?.trim();
+    const name = getVal('name');
+    const email = getVal('email');
+    const phone = getVal('phone');
+    const subject = getVal('subject');
+    const message = getVal('message');
+
+    if (!name || !email || !subject || !message) {
+      alert('Please fill all required fields.');
+      return;
+    }
+
+    try {
+      const endpoint = '/general/messages';
+      await api.post(endpoint, { name, email, phone, subject, message });
+      alert('Message sent successfully!');
+      form.reset();
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      alert(err?.userMessage || 'Failed to send message. Please try again.');
+    }
   };
 
   return (
@@ -27,23 +49,23 @@ const Contact = () => {
               <form className="contact-form" onSubmit={handleSubmit}>
                 <div className="form-group">
                   <label htmlFor="name">Full Name</label>
-                  <input type="text" id="name" placeholder="Enter your full name" required />
+                  <input type="text" id="name" name="name" placeholder="Enter your full name" required />
                 </div>
                 <div className="form-group">
                   <label htmlFor="email">Email Address</label>
-                  <input type="email" id="email" placeholder="Enter your email address" required />
+                  <input type="email" id="email" name="email" placeholder="Enter your email address" required />
                 </div>
                 <div className="form-group">
                   <label htmlFor="phone">Phone Number</label>
-                  <input type="tel" id="phone" placeholder="Enter your phone number" />
+                  <input type="tel" id="phone" name="phone" placeholder="Enter your phone number" />
                 </div>
                 <div className="form-group">
                   <label htmlFor="subject">Subject</label>
-                  <input type="text" id="subject" placeholder="Enter message subject" required />
+                  <input type="text" id="subject" name="subject" placeholder="Enter message subject" required />
                 </div>
                 <div className="form-group">
                   <label htmlFor="message">Message</label>
-                  <textarea id="message" rows="5" placeholder="Enter your message" required></textarea>
+                  <textarea id="message" name="message" rows="5" placeholder="Enter your message" required></textarea>
                 </div>
                 <button type="submit" className="btn btn-primary">Send Message</button>
               </form>

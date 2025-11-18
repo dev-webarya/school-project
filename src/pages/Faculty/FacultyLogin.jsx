@@ -55,6 +55,9 @@ const FacultyLogin = () => {
       }
     } catch (err) {
       console.error('Login error:', err);
+      // Display error to user
+      const errorMessage = err.response?.data?.message || err.message || 'Login failed. Please check your credentials.';
+      showNotification(errorMessage, 'error');
     } finally {
       setIsLogging(false);
     }
@@ -81,16 +84,24 @@ const FacultyLogin = () => {
     e.preventDefault();
     setIsLogging(true);
     try {
-      const { success, message } = await authAPI.forgotPassword({ email: resetEmail });
-      if (success) {
+      const resp = await authAPI.forgotPassword({ email: resetEmail });
+      const data = resp?.data;
+      if (data?.success) {
         showNotification('OTP sent to your email. Check inbox/spam.', 'info');
+        if (data?.preview) {
+          showNotification(`Dev email preview: ${data.preview}`, 'info');
+          try { window.open(data.preview, '_blank', 'noopener,noreferrer'); } catch (e) { console.log('Preview open failed'); }
+        }
+        if (data?.debugOtp) {
+          showNotification(`Dev OTP: ${data.debugOtp}`, 'info');
+        }
         setResetStep(2);
       } else {
-        showNotification(message || 'Failed to send OTP. Try again.', 'error');
+        showNotification(data?.message || 'Failed to send OTP. Try again.', 'error');
       }
     } catch (err) {
       console.error('Forgot password error:', err);
-      showNotification('Failed to send OTP. Please try again.', 'error');
+      showNotification(err.userMessage || 'Failed to send OTP. Please try again.', 'error');
     } finally {
       setIsLogging(false);
     }
@@ -107,13 +118,13 @@ const FacultyLogin = () => {
 
     setIsLogging(true);
     try {
-      const { success, message } = await authAPI.resetPassword({
+      const resp = await authAPI.resetPassword({
         email: resetEmail,
         otp: resetOtp,
-        newPassword
+        password: newPassword
       });
-
-      if (success) {
+      const data = resp?.data;
+      if (data?.success) {
         showNotification('Password reset successful. You can now log in.', 'success');
         setForgotMode(false);
         setResetStep(1);
@@ -122,11 +133,11 @@ const FacultyLogin = () => {
         setNewPassword('');
         setConfirmPassword('');
       } else {
-        showNotification(message || 'Failed to reset password.', 'error');
+        showNotification(data?.message || 'Failed to reset password.', 'error');
       }
     } catch (err) {
       console.error('Reset password error:', err);
-      showNotification('Failed to reset password. Please try again.', 'error');
+      showNotification(err.userMessage || 'Failed to reset password. Please try again.', 'error');
     } finally {
       setIsLogging(false);
     }

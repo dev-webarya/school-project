@@ -19,6 +19,7 @@ const ScheduleManager = () => {
     className: '',
     subject: '',
     teacher: '',
+    employeeId: '',
     room: '',
     day: '',
     startTime: '',
@@ -36,8 +37,12 @@ const ScheduleManager = () => {
     '16:00', '16:30', '17:00', '17:30', '18:00'
   ];
 
-  const [classes, setClasses] = useState([]);
+  // Fixed class options requested by Admin
+  const DEFAULT_CLASSES = ['NS', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
+
+  const [classes, setClasses] = useState(DEFAULT_CLASSES);
   const [subjects, setSubjects] = useState([]);
+  const [faculties, setFaculties] = useState([]);
 
   useEffect(() => {
     fetchInitialData();
@@ -46,26 +51,51 @@ const ScheduleManager = () => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [classesRes, subjectsRes, schedulesRes] = await Promise.all([
-        studentAPI.getClasses({ retry: true }),
+      const [studentsRes, subjectsRes, schedulesRes, facultiesRes] = await Promise.all([
+        adminAPI.getStudents({ params: { page: 1, limit: 100 }, retry: true }),
         subjectAPI.getSubjects({ retry: true }),
-        adminAPI.getSchedules({ retry: true })
+        adminAPI.getSchedules({ retry: true }),
+        // Fetch a larger set of faculty to populate the Assign Faculty dropdown
+        adminAPI.getFaculty({ params: { page: 1, limit: 100 }, retry: true })
       ]);
 
-      const classesData = classesRes.data?.data || classesRes.data || [];
-      const coursesData = subjectsRes.data?.data || subjectsRes.data || [];
-      const schedulesData = schedulesRes.data?.data || schedulesRes.data || [];
-
-      setClasses((classesData || []).map(cl => cl.name || `${cl.class || ''} ${cl.section || ''}`.trim()));
-      // Derive subjects from available subjects (use subjectName)
+      // Normalize API shapes defensively
+      const studentsData = studentsRes.data?.data?.students
+        || studentsRes.data?.students
+        || studentsRes.data?.data
+        || [];
+      const coursesData = subjectsRes.data?.data?.subjects
+        || subjectsRes.data?.subjects
+        || subjectsRes.data?.data
+        || subjectsRes.data
+        || [];
+      const schedulesData = schedulesRes.data?.data?.schedules
+        || schedulesRes.data?.schedules
+        || schedulesRes.data?.data
+        || schedulesRes.data
+        || [];
+      const facultyDataRaw = facultiesRes.data?.data?.faculty
+        || facultiesRes.data?.faculty
+        || facultiesRes.data?.data
+        || [];
+      const facultyOptions = (facultyDataRaw || []).map(f => ({ id: f.id || f._id, name: f.name, employeeId: f.employeeId }));
+      setFaculties(facultyOptions);
+      // Build class list from Admin students and fallback to classes present in schedules
+      const classSet = new Set(
+        (studentsData || [])
+          .map(s => s.class)
+          .filter(Boolean)
+          .map(c => String(c).trim().toUpperCase())
+      );
+      // Derive subjects from available subjects (use subjectName or name)
       const subjectSet = new Set((coursesData || []).map(s => s.subjectName || s.name).filter(Boolean));
-      setSubjects(Array.from(subjectSet));
 
       const normalizedSchedules = (schedulesData || []).map(s => ({
         id: s._id || s.id,
         className: s.className || s.class?.name || s.class,
         subject: s.subject || s.course?.courseName || s.courseName,
         teacher: s.teacher || s.faculty?.name || s.instructor,
+        facultyId: (s.faculty && (s.faculty._id || s.faculty.id || s.faculty)) || undefined,
         room: s.room,
         day: s.day,
         startTime: s.startTime,
@@ -77,9 +107,23 @@ const ScheduleManager = () => {
       }));
 
       setSchedules(normalizedSchedules);
+      // Add classes found in schedules
+      normalizedSchedules.forEach(s => {
+        if (s.className) classSet.add(String(s.className).trim().toUpperCase());
+        if (s.subject) subjectSet.add(String(s.subject).trim());
+      });
+      // Merge fixed classes with discovered classes
+      const classesList = Array.from(new Set([...
+        DEFAULT_CLASSES,
+        ...Array.from(classSet)
+      ]));
+      const subjectsList = Array.from(subjectSet);
+      setClasses(classesList);
+      setSubjects(subjectsList);
     } catch (error) {
       showNotification(error.userMessage || 'Error fetching schedules', 'error');
-      setClasses([]);
+      // Fallback to default classes so dropdowns remain usable
+      setClasses(DEFAULT_CLASSES);
       setSubjects([]);
       setSchedules([]);
     } finally {
@@ -127,6 +171,12 @@ const ScheduleManager = () => {
     setLoading(true);
 
     try {
+      // Ensure a faculty is selected so schedules appear on faculty dashboard
+      if (!formData.employeeId) {
+        showNotification('Please select a faculty for this schedule.', 'error');
+        setLoading(false);
+        return;
+      }
       // Validate time conflict
       const hasConflict = schedules.some(schedule => {
         if (editingSchedule && schedule.id === editingSchedule.id) return false;
@@ -156,7 +206,8 @@ const ScheduleManager = () => {
         duration: parseInt(formData.duration),
         type: formData.type,
         description: formData.description,
-        recurring: Boolean(formData.recurring)
+        recurring: Boolean(formData.recurring),
+        ...(formData.employeeId ? { employeeId: formData.employeeId } : {})
       };
 
       if (editingSchedule) {
@@ -185,8 +236,10 @@ const ScheduleManager = () => {
 
   const handleEdit = (schedule) => {
     setEditingSchedule(schedule);
+    const matchedFaculty = faculties.find(f => String(f.id) === String(schedule.facultyId));
     setFormData({
       ...schedule,
+      employeeId: matchedFaculty?.employeeId || '',
       duration: schedule.duration.toString()
     });
     setShowForm(true);
@@ -212,6 +265,7 @@ const ScheduleManager = () => {
       className: '',
       subject: '',
       teacher: '',
+      employeeId: '',
       room: '',
       day: '',
       startTime: '',
@@ -416,21 +470,39 @@ const ScheduleManager = () => {
                 </div>
                 <div className="form-group">
                   <label>Subject *</label>
-                  <select
+                  <input
+                    type="text"
                     name="subject"
                     value={formData.subject}
                     onChange={handleInputChange}
                     required
-                  >
-                    <option value="">Select Subject</option>
-                    {subjects.map(subject => (
-                      <option key={subject} value={subject}>{subject}</option>
-                    ))}
-                  </select>
+                    placeholder="Subject name"
+                  />
                 </div>
               </div>
 
               <div className="form-row">
+                <div className="form-group">
+                  <label>Assign Faculty *</label>
+                  <select
+                    name="employeeId"
+                    value={formData.employeeId || ''}
+                    onChange={(e) => {
+                      const selected = faculties.find(f => String(f.employeeId) === String(e.target.value));
+                      setFormData(prev => ({
+                        ...prev,
+                        employeeId: e.target.value || '',
+                        teacher: selected?.name || prev.teacher
+                      }));
+                    }}
+                    required
+                  >
+                    <option value="">Select Faculty</option>
+                    {faculties.map(f => (
+                      <option key={f.employeeId} value={f.employeeId}>{f.name} ({f.employeeId})</option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-group">
                   <label>Teacher *</label>
                   <input

@@ -70,6 +70,7 @@ const sendErrorProd = (err, res) => {
 
 // Global error handling middleware
 const globalErrorHandler = (err, req, res, next) => {
+  void next;
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
@@ -106,6 +107,7 @@ const notFound = (req, res, next) => {
 // Handle unhandled promise rejections
 const handleUnhandledRejection = () => {
   process.on('unhandledRejection', (err, promise) => {
+    void promise;
     console.log('UNHANDLED REJECTION! Shutting down...');
     console.log(err.name, err.message);
     process.exit(1);

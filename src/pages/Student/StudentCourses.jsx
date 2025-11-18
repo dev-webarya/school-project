@@ -7,6 +7,7 @@ export default function StudentCourses() {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState(null);
 
   const formatSchedule = (schedule) => {
     if (!schedule) return 'To be announced';
@@ -45,11 +46,15 @@ export default function StudentCourses() {
         const list = Array.isArray(data) ? data : (Array.isArray(data?.classes) ? data.classes : []);
         const normalized = list.map((cl) => ({
           id: cl._id || cl.id || `${Date.now()}-${Math.random()}`,
-          name: cl.name || `${cl.class || ''} ${cl.section || ''}`.trim() || 'Class',
+          name: cl.courseName || cl.name || `${cl.class || ''}${cl.section ? '-' + cl.section : ''}` || 'Untitled Course',
+          subject: cl.subject || 'Subject',
+          courseCode: cl.courseCode || '',
+          class: cl.class || '',
+          section: cl.section || '',
           teacher: cl.faculty ? `${cl.faculty.firstName ?? ''} ${cl.faculty.lastName ?? ''}`.trim() : (cl.teacher || 'TBA'),
           schedule: formatSchedule(cl.schedule),
           progress: 0,
-          description: cl.description || 'Class details will be available soon.',
+          description: cl.description || 'Course details will be available soon.',
         }));
         if (mounted) setCourses(normalized);
       } catch (err) {
@@ -83,6 +88,9 @@ export default function StudentCourses() {
     loadCourses();
     return () => { mounted = false; };
   }, []);
+
+  const openCourse = (course) => setSelectedCourse(course);
+  const closeCourse = () => setSelectedCourse(null);
 
   const emptyState = useMemo(() => (
     <div style={{ background: '#fff', padding: 20, borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
@@ -142,7 +150,7 @@ export default function StudentCourses() {
                   <span style={{ fontWeight: '500' }}>Progress: </span>
                   <span>{course.progress}%</span>
                 </div>
-                <button style={{
+                <button onClick={() => openCourse(course)} style={{
                   background: '#1a237e',
                   color: 'white',
                   border: 'none',
@@ -161,6 +169,24 @@ export default function StudentCourses() {
           </div>
         ))}
       </div>
+
+      {selectedCourse && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div style={{ background: 'white', borderRadius: 12, padding: 24, width: 'min(640px, 92vw)', boxShadow: '0 6px 24px rgba(0,0,0,0.15)', maxHeight: '85vh', overflowY: 'auto' }}>
+            <h2 style={{ marginTop: 0, color: '#1a237e' }}>{selectedCourse.subject} — {selectedCourse.name}</h2>
+            <p style={{ color: '#555' }}>{selectedCourse.description}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 12 }}>
+              <div><strong>Course Code:</strong> {selectedCourse.courseCode || '—'}</div>
+              <div><strong>Class:</strong> {selectedCourse.class}{selectedCourse.section ? '-' + selectedCourse.section : ''}</div>
+              <div><strong>Teacher:</strong> {selectedCourse.teacher}</div>
+              <div><strong>Schedule:</strong> {selectedCourse.schedule}</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <button onClick={closeCourse} style={{ background: '#e0e0e0', color: '#333', border: 'none', padding: '8px 14px', borderRadius: 6, cursor: 'pointer' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

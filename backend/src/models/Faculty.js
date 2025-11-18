@@ -356,6 +356,7 @@ facultySchema.methods.getTeachingLoad = function() {
 
 // Instance method to calculate leave taken
 facultySchema.methods.calculateLeaveTaken = async function(year) {
+  void year;
   // This would typically involve querying leave records
   // For now, return a placeholder
   return {

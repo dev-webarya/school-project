@@ -18,7 +18,7 @@ const connectDB = async () => {
     // Connect to MongoDB
     const conn = await mongoose.connect(process.env.MONGODB_URI, options);
 
-    console.log(`MongoDB Connected Successfully!`);
+    console.log('MongoDB Connected Successfully!');
     console.log(`Host: ${conn.connection.host}`);
     console.log(`Database: ${conn.connection.name}`);
     console.log(`Connection Type: ${process.env.MONGODB_URI.includes('mongodb+srv') ? 'MongoDB Atlas (Cloud)' : 'Local MongoDB'}`);

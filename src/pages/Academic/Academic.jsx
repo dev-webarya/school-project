@@ -1,36 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { FaCalendarAlt, FaBook, FaUserGraduate, FaChalkboardTeacher, FaDownload } from 'react-icons/fa';
+import { FaCalendarAlt, FaUserGraduate } from 'react-icons/fa';
 import { generalAPI } from '../../services/api.js';
 import { useNotification } from '../../hooks/useNotification.js';
 import './Academic.css';
 
 const Academic = () => {
   const [activeTab, setActiveTab] = useState('sessions');
-  const { showNotification } = useNotification();
+  const { showError } = useNotification();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const [academicSessions, setAcademicSessions] = useState([]);
-  const [departments, setDepartments] = useState([]);
-  const [documents, setDocuments] = useState([]);
+  // Departments and Academic Documents removed
+
+  const hasLoadedRef = useRef(false);
 
   useEffect(() => {
+    if (hasLoadedRef.current) return;
+    hasLoadedRef.current = true;
+
     const loadData = async () => {
       setLoading(true);
       setError(null);
       try {
         // Load events as academic sessions (fallback-friendly mapping)
         const eventsRes = await generalAPI.getEvents();
-        const events = Array.isArray(eventsRes.data) ? eventsRes.data : (eventsRes.data?.events || []);
-        const mappedSessions = (events || []).map((evt, idx) => {
+        // Backend returns { success: true, data: events }
+        const events = Array.isArray(eventsRes.data) ? eventsRes.data : (eventsRes.data?.data || []);
+        // Only show Exam-related events under Academic Sessions
+        const examEvents = (events || []).filter((evt) => {
+          const typeStr = (evt.eventType || evt.type || '').toLowerCase();
+          return typeStr.includes('exam');
+        });
+        const mappedSessions = (examEvents || []).map((evt, idx) => {
           const start = evt.startDate || evt.date || evt.start || evt.createdAt;
           const end = evt.endDate || evt.end || evt.updatedAt;
           const startStr = start ? new Date(start).toLocaleDateString() : 'TBD';
           const endStr = end ? new Date(end).toLocaleDateString() : 'TBD';
           const year = start ? `${new Date(start).getFullYear()}` : (evt.year || 'Upcoming');
           const highlights = [
-            evt.title || evt.name || 'Academic event',
+            evt.title || evt.name || 'Exam',
             evt.description || evt.details || ''
           ].filter(Boolean);
           return {
@@ -43,45 +53,16 @@ const Academic = () => {
         });
         setAcademicSessions(mappedSessions.length ? mappedSessions : []);
 
-        // Build departments from public subjects by grouping by subject.department
-        const subjectsRes = await generalAPI.getPublicSubjects();
-        const subjects = Array.isArray(subjectsRes.data)
-          ? subjectsRes.data
-          : (subjectsRes.data?.subjects || subjectsRes.data?.data || []);
-        const deptMap = new Map();
-        (subjects || []).forEach((s) => {
-          const deptName = s.department || s.dept || s.category || 'General';
-          const subjectName = s.name || s.title || s.code || 'Subject';
-          if (!deptMap.has(deptName)) {
-            deptMap.set(deptName, { id: deptMap.size + 1, name: deptName, head: '', subjects: [] });
-          }
-          const entry = deptMap.get(deptName);
-          if (!entry.subjects.includes(subjectName)) {
-            entry.subjects.push(subjectName);
-          }
-        });
-        setDepartments(Array.from(deptMap.values()));
-
-        // Load academic documents via notices as downloadable references
-        const noticesRes = await generalAPI.getNotices();
-        const notices = Array.isArray(noticesRes.data) ? noticesRes.data : (noticesRes.data?.notices || []);
-        const mappedDocs = (notices || []).map((n, idx) => ({
-          id: n._id || n.id || idx + 1,
-          name: n.title || 'Notice',
-          type: 'Notice',
-          size: n.size || '-',
-          url: n.link || n.url || '#',
-        }));
-        setDocuments(mappedDocs);
+        // Removed Departments and Academic Documents data loading
       } catch (err) {
         setError(err.userMessage || 'Failed to load academic data');
-        showNotification(err.userMessage || 'Failed to load academic data', 'error');
+        showError(err.userMessage || 'Failed to load academic data');
       } finally {
         setLoading(false);
       }
     };
     loadData();
-  }, [showNotification]);
+  }, []);
 
   return (
     <main className="academic-page">
@@ -103,18 +84,7 @@ const Academic = () => {
             >
               <FaCalendarAlt /> Academic Sessions
             </button>
-            <button 
-              className={activeTab === 'departments' ? 'active' : ''} 
-              onClick={() => setActiveTab('departments')}
-            >
-              <FaChalkboardTeacher /> Departments
-            </button>
-            <button 
-              className={activeTab === 'documents' ? 'active' : ''} 
-              onClick={() => setActiveTab('documents')}
-            >
-              <FaBook /> Academic Documents
-            </button>
+            {/* Departments and Academic Documents tabs removed */}
             <Link to="/academic/updates" className="tab-link">
               <FaUserGraduate /> Academy Updates
             </Link>
@@ -154,58 +124,7 @@ const Academic = () => {
               </div>
             )}
 
-            {activeTab === 'departments' && (
-              <div className="departments-content">
-                <h2>Academic Departments</h2>
-                <p>Our school has specialized departments with experienced faculty members dedicated to providing quality education:</p>
-                
-                <div className="departments-grid">
-                  {departments.length === 0 && !loading && !error && (
-                    <p>No departments available.</p>
-                  )}
-                  {departments.map(dept => (
-                    <div className="department-card" key={dept.id}>
-                      <h3>{dept.name}</h3>
-                      {dept.head && (
-                        <p className="department-head"><strong>Head:</strong> {dept.head}</p>
-                      )}
-                      <div className="department-subjects">
-                        <h4>Subjects:</h4>
-                        <ul>
-                          {dept.subjects.map((subject, index) => (
-                            <li key={index}>{subject}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'documents' && (
-              <div className="documents-content">
-                <h2>Academic Documents</h2>
-                <p>Download important academic documents and resources:</p>
-                
-                <div className="documents-list">
-                  {documents.length === 0 && !loading && !error && (
-                    <p>No documents available.</p>
-                  )}
-                  {documents.map(doc => (
-                    <div className="document-item" key={doc.id}>
-                      <div className="document-info">
-                        <h3>{doc.name}</h3>
-                        <p>{doc.type} • {doc.size}</p>
-                      </div>
-                      <a className="download-btn" href={doc.url || '#'} target="_blank" rel="noreferrer">
-                        <FaDownload /> Download
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Departments and Academic Documents sections removed */}
           </div>
         </div>
       </section>

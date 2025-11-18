@@ -5,16 +5,6 @@ import { saveAs } from 'file-saver';
 
 // Export analytics data to PDF
 const resolveJsPDF = () => {
-  try {
-    // Prefer CommonJS require in Jest to match test's mocked constructor identity
-    // eslint-disable-next-line no-undef
-    if (typeof require === 'function') {
-      const mod = require('jspdf');
-      if (mod && mod.mock) return mod;
-    }
-  } catch (e) {
-    // ignore
-  }
   return (jsPDF && jsPDF.default) ? jsPDF.default : jsPDF;
 };
 

@@ -8,21 +8,15 @@ class EmailService {
 
   initializeTransporter() {
     try {
-      // Create transporter based on environment
-      if (process.env.NODE_ENV === 'production') {
-        // Production email configuration (supports Gmail via EMAIL_SERVICE)
-        const user = process.env.EMAIL_USER;
-        const pass = process.env.EMAIL_PASS;
-        const service = process.env.EMAIL_SERVICE; // e.g., 'gmail'
-        const host = process.env.EMAIL_HOST || 'smtp.gmail.com';
-        const port = parseInt(process.env.EMAIL_PORT) || 587;
+      // Prefer real SMTP if credentials are provided, regardless of environment
+      const user = process.env.EMAIL_USER;
+      const pass = process.env.EMAIL_PASS;
+      const service = process.env.EMAIL_SERVICE; // e.g., 'gmail'
+      const host = process.env.EMAIL_HOST || 'smtp.gmail.com';
+      const port = parseInt(process.env.EMAIL_PORT) || 587;
+      const forceTest = String(process.env.EMAIL_USE_TEST || 'false').toLowerCase() === 'true';
 
-        if (!user || !pass) {
-          console.error('Email credentials missing: set EMAIL_USER and EMAIL_PASS');
-          this.transporter = null;
-          return;
-        }
-
+      if (!forceTest && user && pass) {
         if (service) {
           this.transporter = nodemailer.createTransport({
             service,
@@ -36,10 +30,18 @@ class EmailService {
             auth: { user, pass }
           });
         }
-      } else {
-        // Development - use Ethereal Email for testing
-        this.createTestAccount();
+        return;
       }
+
+      // If in production without credentials, warn and disable transporter
+      if (process.env.NODE_ENV === 'production') {
+        console.error('Email credentials missing: set EMAIL_USER and EMAIL_PASS');
+        this.transporter = null;
+        return;
+      }
+
+      // Development fallback: use Ethereal test account
+      this.createTestAccount();
     } catch (error) {
       console.error('Email service initialization error:', error);
     }
@@ -86,7 +88,7 @@ class EmailService {
       const html = this.getEmailTemplate(otp, type);
 
       const mailOptions = {
-        from: process.env.EMAIL_FROM || '"BBD School" <noreply@bbd.edu.in>',
+        from: process.env.EMAIL_FROM || '"BBD School" <sunil.bbdacademy@gmail.com>',
         to: email,
         subject: subject,
         html: html
@@ -142,6 +144,7 @@ class EmailService {
 
   getEmailTemplate(otp, type) {
     const title = this.getSubject(type);
+    const expiryMinutes = type === 'password-reset' ? 10 : 5;
     
     return `
     <!DOCTYPE html>
@@ -173,7 +176,7 @@ class EmailService {
                 
                 <div class="otp-box">
                     <div class="otp-code">${otp}</div>
-                    <p><strong>This code will expire in 5 minutes</strong></p>
+                    <p><strong>This code will expire in ${expiryMinutes} minutes</strong></p>
                 </div>
                 
                 <div class="warning">

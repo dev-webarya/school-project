@@ -1,53 +1,48 @@
 import React, { useEffect, useState } from 'react';
-import { adminAPI, subjectAPI } from '../../services/api.js';
+import api, { adminAPI } from '../../services/api.js';
+import config from '../../config/config.js';
+import './StudentEnrollment.css';
 
 // Minimal implementation aligned with tests in src/tests/StudentEnrollment.test.js
 const StudentEnrollment = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [courses, setCourses] = useState([]);
   const [students, setStudents] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [waitlists, setWaitlists] = useState([]);
-  const [view, setView] = useState('courses');
-  const [department, setDepartment] = useState('All Departments');
+  const [view, setView] = useState('students');
+  const [classFilter, setClassFilter] = useState('All Classes');
   const [search, setSearch] = useState('');
 
-  const [showEnrollModal, setShowEnrollModal] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
-  const [selectedCourseId, setSelectedCourseId] = useState(null);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         setError('');
+        let studentsRes, admissionsRes;
 
-        // Fetch subjects (used as courses replacement)
-        const [subjectsRes, studentsRes] = await Promise.all([
-          subjectAPI.getSubjects({ retry: true }),
-          adminAPI.getStudents({ params: { page: 1, limit: 50 } })
-        ]);
+        if (config.IS_E2E) {
+          [studentsRes, admissionsRes] = await Promise.all([
+            adminAPI.getStudents({ params: { page: 1, limit: 50 } }),
+            api.get('/e2e/admissions')
+          ]);
+        } else {
+          [studentsRes] = await Promise.all([
+            adminAPI.getStudents({ params: { page: 1, limit: 50 } })
+          ]);
+          try {
+            admissionsRes = await adminAPI.getAdmissions({ params: { status: 'submitted', limit: 50 } });
+          } catch (admErr) {
+            console.warn('Admin admissions fetch failed:', admErr);
+          }
+        }
 
-        const subjectsData = Array.isArray(subjectsRes.data?.data) ? subjectsRes.data.data : (Array.isArray(subjectsRes.data) ? subjectsRes.data : []);
-        const mappedCourses = (subjectsData || []).map(s => ({
-          id: s._id || s.id,
-          name: s.subjectName || s.name || 'Untitled',
-          code: s.subjectCode || s.code || '-',
-          department: s.department || 'General',
-          instructor: s.faculty ? (s.faculty.name || `${s.faculty.firstName || ''} ${s.faculty.lastName || ''}`.trim()) : 'Unassigned',
-          capacity: s.capacity || 0,
-          enrolled: Array.isArray(s.enrolledStudents) ? s.enrolledStudents.length : 0,
-          waitlist: s.waitlistCount || 0,
-          credits: s.credits || 0,
-          schedule: s.schedule || '',
-          status: s.isActive === false ? 'inactive' : 'active'
-        }));
+        // Courses view removed in enrollment; subjects fetch omitted
 
-        // Fetch students (admin list API returns transformed data)
-        const studentsData = studentsRes.data?.data?.students || [];
+        // Students (admin list API returns transformed data)
+        const studentsData = studentsRes?.data?.data?.students || [];
         const mappedStudents = studentsData.map(s => ({
           id: s.id,
           name: s.name,
@@ -58,10 +53,31 @@ const StudentEnrollment = () => {
           gpa: s.gpa || null
         }));
 
-        setCourses(mappedCourses);
+        // Admissions mapped into local waitlist view
+        let mappedWaitlists = [];
+        if (admissionsRes) {
+          const admissionsData = config.IS_E2E
+            ? (Array.isArray(admissionsRes?.data?.data)
+                ? admissionsRes.data.data
+                : (Array.isArray(admissionsRes?.data) ? admissionsRes.data : []))
+            : (Array.isArray(admissionsRes?.data?.data?.admissions)
+                ? admissionsRes.data.data.admissions
+                : []);
+
+          mappedWaitlists = (admissionsData || []).map(app => ({
+            id: app._id || app.id || app.applicationNumber,
+            applicantName: app?.studentInfo?.name || app?.studentInfo?.fullName || '-',
+            applyingClass: app?.academicInfo?.applyingForClass || '-',
+            applicationNumber: app?.applicationNumber || '-',
+            status: app?.status || 'submitted',
+            receivedAt: app?.submittedAt || app?.createdAt || null,
+            processed: app?.status === 'approved'
+          }));
+        }
+
         setStudents(mappedStudents);
         setEnrollments([]);
-        setWaitlists([]);
+        setWaitlists(mappedWaitlists);
       } catch (err) {
         console.error('Enrollment data fetch error:', err);
         setError(err.userMessage || 'Failed to load enrollment data');
@@ -73,40 +89,7 @@ const StudentEnrollment = () => {
     fetchData();
   }, []);
 
-  const onOpenEnroll = (courseId) => {
-    setSelectedCourseId(courseId);
-    setSelectedStudentId('');
-    setValidationError('');
-    setShowEnrollModal(true);
-  };
-
-  const onOpenWaitlist = (courseId) => {
-    setSelectedCourseId(courseId);
-    setSelectedStudentId('');
-    setShowWaitlistModal(true);
-  };
-
-  const submitEnrollment = () => {
-    if (!selectedStudentId) {
-      setValidationError('Please select a student');
-      return;
-    }
-    const enroll = async () => {
-      try {
-        setValidationError('');
-        // Local-only update to reflect enrollment (backend endpoint removed)
-        const newEnrollments = [...enrollments, { courseId: selectedCourseId, studentId: String(selectedStudentId) }];
-        setEnrollments(newEnrollments);
-        // Optimistically update course enrollment count
-        setCourses(prev => prev.map(c => c.id === selectedCourseId ? { ...c, enrolled: (c.enrolled || 0) + 1 } : c));
-        setShowEnrollModal(false);
-      } catch (err) {
-        console.error('Enrollment error:', err);
-        setValidationError(err.userMessage || 'Failed to enroll student');
-      }
-    };
-    enroll();
-  };
+  // Courses enrollment actions removed
 
   const processWaitlist = (wl) => {
     // Placeholder for future backend integration; update local state only
@@ -119,12 +102,11 @@ const StudentEnrollment = () => {
     setWaitlists(updated);
   };
 
-  const totalActiveEnrollments = enrollments.length; // tests only check labels
-  const totalWaitlisted = waitlists.length;
+  // Metrics derived directly in render
 
   return (
-    <div style={{ padding: 16 }}>
-      <h1>Student Enrollment Management</h1>
+    <div className="enroll-container">
+      <h1 className="enroll-title">Student Enrollment Management</h1>
 
       {loading && <div>Loading enrollment data...</div>}
       {error && !loading && (
@@ -133,50 +115,96 @@ const StudentEnrollment = () => {
 
       {!loading && (
         <>
-          <div style={{ margin: '12px 0' }}>
-            <div>Total Courses: {courses.length}</div>
-            <div>Total Students: {students.length}</div>
-            <div>Active Enrollments: {enrollments.length}</div>
-            <div>Waitlisted Students: {waitlists.length}</div>
+          <div className="metrics">
+            <div className="metric">
+              <span className="metric-label">Total Students</span>
+              <span className="metric-value">{students.length}</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Active Enrollments</span>
+              <span className="metric-value">{enrollments.length}</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">Waitlisted Students</span>
+              <span className="metric-value">{waitlists.length}</span>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+          <div className="filters">
             <select value={view} onChange={(e) => setView(e.target.value)}>
-              <option value="courses">Courses</option>
-              <option value="students">students</option>
-              <option value="waitlist">waitlist</option>
-              <option value="analytics">analytics</option>
+              <option value="students">Student</option>
+              <option value="waitlist">Waitlist</option>
+              <option value="analytics">Analytics</option>
             </select>
 
-            {view === 'courses' && (
+            {view === 'students' && (
               <>
-                <select value={department} onChange={(e) => setDepartment(e.target.value)}>
-                  <option>All Departments</option>
-                  <option>Computer Science</option>
-                  <option>Mathematics</option>
+                <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)}>
+                  <option>All Classes</option>
+                  {config.CLASS_OPTIONS?.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
                 <input
-                  placeholder="Search courses..."
+                  className="search-input"
+                  placeholder="Search Student..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </>
             )}
+
+            {/* Courses filter removed */}
           </div>
 
           {view === 'students' && (
-            <h2>Student Management</h2>
+            <div>
+              <h2>Student Management</h2>
+              <div className="card-grid">
+                {students
+                  .filter(s => (
+                    classFilter === 'All Classes' || s.year === classFilter || s.class === classFilter
+                  ))
+                  .filter(s => (
+                    search ? (s.name?.toLowerCase().includes(search.toLowerCase()) || s.studentId?.toLowerCase().includes(search.toLowerCase())) : true
+                  ))
+                  .map((s, idx) => (
+                    <div key={s.id || s.studentId || s.email || idx} className="course-card">
+                      <div className="card-header">
+                        <strong>{s.name}</strong>
+                        <span className="status-badge active">STUDENT</span>
+                      </div>
+                      <div className="card-sub">ID: {s.studentId} • {s.department} • {s.year || '-'}</div>
+                      <div className="card-sub">{s.email}</div>
+                    </div>
+                  ))}
+                {students.length === 0 && (
+                  <div style={{ color: '#666' }}>No students found.</div>
+                )}
+              </div>
+            </div>
           )}
 
           {view === 'waitlist' && (
             <div>
               <h2>Waitlist Management</h2>
-              <div>
-                {waitlists.map((wl, idx) => (
-                  <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span>Course {wl.courseId} - Student {wl.studentId}</span>
-                    <button onClick={() => processWaitlist(wl)}>Process Waitlist</button>
-                    <button onClick={() => removeFromWaitlist(wl)}>Remove</button>
+              <div className="card-grid">
+                {waitlists.length === 0 && (
+                  <div style={{ color: '#666' }}>No waitlisted applications yet.</div>
+                )}
+                {waitlists.map((wl) => (
+                  <div key={wl.id} className="course-card">
+                    <div className="card-header">
+                      <strong>{wl.applicantName}</strong>
+                      <span className={`status-badge ${wl.processed ? 'approved' : 'submitted'}`}>{(wl.status || 'submitted').toUpperCase()}</span>
+                    </div>
+                    <div className="card-sub">Application #{wl.applicationNumber}</div>
+                    <div className="card-sub">Class: {wl.applyingClass}</div>
+                    {wl.receivedAt && <div className="card-sub">Received: {new Date(wl.receivedAt).toLocaleString()}</div>}
+                    <div className="card-actions">
+                      <button onClick={() => processWaitlist(wl)}>Process</button>
+                      <button onClick={() => removeFromWaitlist(wl)} className="secondary">Remove</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -186,66 +214,38 @@ const StudentEnrollment = () => {
           {view === 'analytics' && (
             <div>
               <h2>Enrollment Analytics</h2>
-              <div>Enrollment by Department</div>
-              <div>Capacity Utilization</div>
-            </div>
-          )}
-
-          {view === 'courses' && !showEnrollModal && !showWaitlistModal && (
-            <div>
-              {courses
-                .filter(c => (department === 'All Departments' || c.department === department))
-                .filter(c => (search ? (c.name?.toLowerCase().includes(search.toLowerCase()) || c.code?.toLowerCase().includes(search.toLowerCase())) : true))
-                .map(course => (
-                <div key={course.id} style={{ border: '1px solid #ddd', padding: 12, marginBottom: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <strong>{course.name}</strong>
-                    <span style={{ fontWeight: 'bold' }}>{course.status.toUpperCase()}</span>
+              <div style={{ marginTop: 12, marginBottom: 8, fontWeight: 600 }}>Enrollment by Classes</div>
+              {(() => {
+                const counts = students.reduce((acc, s) => {
+                  const key = s.year || s.class || 'Unknown';
+                  acc[key] = (acc[key] || 0) + 1;
+                  return acc;
+                }, {});
+                const entries = Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]));
+                const max = Math.max(1, ...entries.map(([_, c]) => c));
+                return (
+                  <div>
+                    {entries.length === 0 && (
+                      <div style={{ color: '#666' }}>No enrollment data available.</div>
+                    )}
+                    {entries.map(([cls, count]) => (
+                      <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '6px 0' }}>
+                        <div style={{ width: 120 }}>{cls}</div>
+                        <div style={{ flex: 1, background: '#eef2ff', height: 12, position: 'relative' }}>
+                          <div style={{ width: `${(count / max) * 100}%`, height: '100%', background: '#3b82f6' }}></div>
+                        </div>
+                        <div style={{ width: 36, textAlign: 'right' }}>{count}</div>
+                      </div>
+                    ))}
                   </div>
-                  <div>{course.code} • {course.department} • {course.instructor}</div>
-                  <div>{course.enrolled}/{course.capacity}</div>
-                  <div>Waitlist: {course.waitlist}</div>
-
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                    <button onClick={() => onOpenEnroll(course.id)}>Enroll Student</button>
-                    <button onClick={() => onOpenWaitlist(course.id)}>Add to Waitlist</button>
-                  </div>
-                </div>
-              ))}
+                );
+              })()}
             </div>
           )}
 
-          {showEnrollModal && (
-            <div role="dialog" aria-modal="true" style={{ border: '1px solid #ccc', padding: 12 }}>
-              <h3>Enroll Student in Course</h3>
-              <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
-                <option value="">Select Student</option>
-                {students.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              {validationError && <div>{validationError}</div>}
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button onClick={submitEnrollment}>Enroll Student</button>
-                <button onClick={() => setShowEnrollModal(false)}>Cancel</button>
-              </div>
-            </div>
-          )}
+          {/* Courses list removed */}
 
-          {showWaitlistModal && (
-            <div role="dialog" aria-modal="true" style={{ border: '1px solid #ccc', padding: 12 }}>
-              <h3>Add Student to Waitlist</h3>
-              <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)}>
-                <option value="">Select Student</option>
-                {students.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button onClick={() => setShowWaitlistModal(false)}>Close</button>
-              </div>
-            </div>
-          )}
+          {/* Enrollment/Waitlist modals removed with courses view */}
         </>
       )}
     </div>

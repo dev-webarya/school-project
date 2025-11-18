@@ -28,39 +28,46 @@ export default function AcademicCalendar() {
   const [newEvent, setNewEvent] = useState({
     title: '',
     description: '',
-    eventType: 'academic',
+    eventType: 'Academic Event',
     startDate: '',
     endDate: '',
     startTime: '',
     endTime: '',
-    isAllDay: false,
+    isAllDay: true,
     location: '',
-    targetAudience: ['all'],
-    priority: 'medium',
+    targetAudience: ['All'],
+    priority: 'Medium',
     color: '#007bff'
   });
 
+  // Must match backend enum in AcademicCalendar model
   const eventTypes = [
-    { value: 'academic', label: 'Academic' },
-    { value: 'examination', label: 'Examination' },
-    { value: 'holiday', label: 'Holiday' },
-    { value: 'meeting', label: 'Meeting' },
-    { value: 'event', label: 'Event' },
-    { value: 'deadline', label: 'Deadline' }
+    { value: 'Holiday', label: 'Holiday' },
+    { value: 'Exam', label: 'Exam' },
+    { value: 'Parent Meeting', label: 'Parent Meeting' },
+    { value: 'Sports Event', label: 'Sports Event' },
+    { value: 'Cultural Event', label: 'Cultural Event' },
+    { value: 'Academic Event', label: 'Academic Event' },
+    { value: 'Administrative', label: 'Administrative' },
+    { value: 'Fee Due Date', label: 'Fee Due Date' },
+    { value: 'Admission', label: 'Admission' },
+    { value: 'Result Declaration', label: 'Result Declaration' },
+    { value: 'Vacation', label: 'Vacation' }
   ];
 
   const targetAudienceOptions = [
-    { value: 'all', label: 'All' },
-    { value: 'students', label: 'Students' },
-    { value: 'faculty', label: 'Faculty' },
-    { value: 'admin', label: 'Admin' },
-    { value: 'parents', label: 'Parents' }
+    { value: 'All', label: 'All' },
+    { value: 'Students', label: 'Students' },
+    { value: 'Faculty', label: 'Faculty' },
+    { value: 'Admin', label: 'Admin' },
+    { value: 'Parents', label: 'Parents' }
   ];
 
   const priorityOptions = [
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' }
+    { value: 'Low', label: 'Low' },
+    { value: 'Medium', label: 'Medium' },
+    { value: 'High', label: 'High' },
+    { value: 'Critical', label: 'Critical' }
   ];
 
   useEffect(() => {
@@ -71,8 +78,8 @@ export default function AcademicCalendar() {
     try {
       setLoading(true);
       const params = {};
-      if (filters.eventType) params.eventType = filters.eventType;
-      if (filters.targetAudience) params.targetAudience = filters.targetAudience;
+      if (filters.eventType) params.eventType = filters.eventType; // Already exact enum
+      if (filters.targetAudience) params.targetAudience = filters.targetAudience; // Exact enum
       if (filters.startDate) params.startDate = filters.startDate;
       if (filters.endDate) params.endDate = filters.endDate;
 
@@ -140,15 +147,15 @@ export default function AcademicCalendar() {
     setNewEvent({
       title: '',
       description: '',
-      eventType: 'academic',
+      eventType: 'Academic Event',
       startDate: '',
       endDate: '',
       startTime: '',
       endTime: '',
-      isAllDay: false,
+      isAllDay: true,
       location: '',
-      targetAudience: ['all'],
-      priority: 'medium',
+      targetAudience: ['All'],
+      priority: 'Medium',
       color: '#007bff'
     });
   };
@@ -202,6 +209,7 @@ export default function AcademicCalendar() {
           className="add-btn"
           onClick={() => {
             resetForm();
+            setEditingEvent(null);
             setShowAddModal(true);
           }}
         >

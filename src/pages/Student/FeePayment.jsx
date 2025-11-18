@@ -14,21 +14,31 @@ export default function FeePayment() {
       setIsLoading(true);
       try {
         const res = await studentAPI.getFees();
-        const data = Array.isArray(res.data) ? res.data : (res.data?.fees || []);
-        const normalized = data.map(f => ({
-          id: f.id ?? f._id ?? Math.random(),
-          type: f.type ?? f.name ?? 'Fee',
-          amount: Number(f.amount ?? 0),
-          dueDate: f.dueDate ?? new Date().toISOString(),
-          status: f.status ?? 'pending',
-          session: f.session ?? f.semester ?? '',
-          description: f.description ?? '',
-          paidDate: f.paidDate ?? null
+        const payload = res?.data?.data || {};
+        const dues = Array.isArray(payload.dues) ? payload.dues : [];
+        const payments = Array.isArray(payload.payments) ? payload.payments : [];
+        const normalized = dues.map(d => ({
+          id: String(d._id || Math.random()),
+          type: `Installment ${d.installmentNumber}`,
+          amount: Number(d.amount || 0),
+          dueDate: d.dueDate || new Date().toISOString(),
+          status: d.status || 'pending',
+          session: '',
+          description: '',
+          paidDate: d.status === 'paid' ? (payments.find(p => p.installmentNumber === d.installmentNumber)?.paymentDetails?.paymentDate || null) : null
         }));
         setFees(normalized);
+        setHistory(payments.map(p => ({
+          id: String(p._id || Math.random()),
+          type: `Installment ${p.installmentNumber}`,
+          amount: Number(p.paymentDetails?.amount || 0),
+          date: p.paymentDetails?.paymentDate || new Date().toISOString(),
+          transactionId: p.paymentDetails?.transactionId || '',
+          method: p.paymentDetails?.paymentMethod || ''
+        })));
       } catch (error) {
-        console.error('Failed to load fees', error);
         setFees([]);
+        setHistory([]);
       } finally {
         setIsLoading(false);
       }
@@ -36,24 +46,7 @@ export default function FeePayment() {
     loadFees();
   }, []);
 
-  const paymentHistory = [
-    {
-      id: 1,
-      type: 'Tuition Fee',
-      amount: 25000,
-      date: '2024-01-15',
-      transactionId: 'TXN123456789',
-      method: 'Credit Card'
-    },
-    // {
-    //   id: 2,
-    //   type: 'Hostel Fee',
-    //   amount: 8000,
-    //   date: '2024-01-10',
-    //   transactionId: 'TXN123456788',
-    //   method: 'Net Banking'
-    // }
-  ];
+  const [history, setHistory] = useState([]);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -81,9 +74,20 @@ export default function FeePayment() {
   const processPayment = async () => {
     if (!selectedFee) return;
     try {
-      await studentAPI.payFees({ feeId: selectedFee.id, method: selectedPaymentMethod });
+      const res = await studentAPI.payFees({ dueId: selectedFee.id, paymentMethod: selectedPaymentMethod });
+      const p = res?.data?.data?.payment;
       alert(`Payment of ₹${selectedFee.amount} processed successfully!`);
       setFees(prev => prev.map(f => f.id === selectedFee.id ? { ...f, status: 'paid', paidDate: new Date().toISOString() } : f));
+      if (p) {
+        setHistory(prev => [{
+          id: String(p._id || Math.random()),
+          type: `Installment ${p.installmentNumber}`,
+          amount: Number(p.paymentDetails?.amount || 0),
+          date: p.paymentDetails?.paymentDate || new Date().toISOString(),
+          transactionId: p.paymentDetails?.transactionId || '',
+          method: p.paymentDetails?.paymentMethod || ''
+        }, ...prev]);
+      }
     } catch (error) {
       alert(error.userMessage || 'Payment failed. Please try again.');
     } finally {
@@ -248,7 +252,7 @@ export default function FeePayment() {
               </tr>
             </thead>
             <tbody>
-              {paymentHistory.map(payment => (
+              {history.map(payment => (
                 <tr key={payment.id}>
                   <td style={{ padding: '12px', borderBottom: '1px solid #dee2e6' }}>{payment.type}</td>
                   <td style={{ padding: '12px', borderBottom: '1px solid #dee2e6' }}>₹{payment.amount.toLocaleString()}</td>
