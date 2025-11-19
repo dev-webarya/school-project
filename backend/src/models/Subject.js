@@ -90,7 +90,7 @@ const subjectSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
-subjectSchema.index({ code: 1 });
+// Removed explicit code index to avoid duplication with unique: true on field
 subjectSchema.index({ department: 1 });
 subjectSchema.index({ session: 1 });
 subjectSchema.index({ isActive: 1 });

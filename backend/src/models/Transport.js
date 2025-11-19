@@ -198,10 +198,10 @@ const transportAllocationSchema = new mongoose.Schema({
 });
 
 // Indexes
-routeSchema.index({ routeNumber: 1 });
+// Removed explicit routeNumber index to avoid duplication with unique: true on field
 routeSchema.index({ isActive: 1 });
 
-vehicleSchema.index({ vehicleNumber: 1 });
+// Removed explicit vehicleNumber index to avoid duplication with unique: true on field
 vehicleSchema.index({ route: 1 });
 vehicleSchema.index({ isActive: 1 });
 

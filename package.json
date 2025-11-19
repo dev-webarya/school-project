@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "cross-env VITE_API_BASE_URL=/api vite build",
+    "build": "vite build",
     "lint": "eslint src --ext js,jsx --quiet",
     "lint:fix": "eslint . --ext js,jsx --fix",
     "format": "prettier --write \"src/**/*.{js,jsx,css}\"",

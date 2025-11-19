@@ -14,7 +14,7 @@ const config = {
   // API Configuration
   // Prefer dev proxy by default in development to avoid direct localhost calls
   // Use Vite's built-in DEV flag, not custom VITE_NODE_ENV
-  API_BASE_URL: ENV.VITE_API_BASE_URL || (ENV.DEV ? '/api' : 'http://localhost:5000/api'),
+  API_BASE_URL: ENV.VITE_API_BASE_URL || '/api',
   
   // App Configuration
   APP_NAME: ENV.VITE_APP_NAME || 'BBD School Management System',

@@ -351,7 +351,7 @@ admissionSchema.virtual('documentsCompletionPercentage').get(function() {
 });
 
 // Indexes for better query performance
-admissionSchema.index({ applicationNumber: 1 });
+// Removed explicit applicationNumber index to avoid duplication with unique: true on field
 admissionSchema.index({ status: 1 });
 admissionSchema.index({ 'academicInfo.academicYear': 1 });
 admissionSchema.index({ 'academicInfo.applyingForClass': 1 });

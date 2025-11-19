@@ -158,7 +158,7 @@ userSchema.virtual('isLocked').get(function() {
 });
 
 // Index for better query performance
-userSchema.index({ email: 1 });
+// Removed explicit email index to avoid duplication with unique: true on field
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ createdAt: -1 });
 

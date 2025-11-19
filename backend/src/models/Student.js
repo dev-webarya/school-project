@@ -233,10 +233,11 @@ studentSchema.virtual('age').get(function() {
 });
 
 // Indexes for better query performance
-studentSchema.index({ studentId: 1 });
+// Removed explicit studentId index to avoid duplication with unique: true on field
 studentSchema.index({ class: 1, section: 1 });
 studentSchema.index({ academicYear: 1 });
-studentSchema.index({ admissionNumber: 1 });
+// Removed explicit admissionNumber index to avoid duplication with unique: true on field
+// studentSchema.index({ admissionNumber: 1 });
 studentSchema.index({ status: 1 });
 studentSchema.index({ 'father.phone': 1 });
 studentSchema.index({ 'mother.phone': 1 });

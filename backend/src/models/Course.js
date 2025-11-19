@@ -21,7 +21,7 @@ const courseSchema = new mongoose.Schema({
 });
 
 // Ensure unique index on courseCode
-courseSchema.index({ courseCode: 1 }, { unique: true });
+// Removed explicit index to avoid duplication with unique: true on field
 courseSchema.index({ faculty: 1, class: 1, subject: 1 });
 courseSchema.index({ class: 1, section: 1 });
 

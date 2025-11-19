@@ -300,7 +300,7 @@ facultySchema.virtual('totalLeaveBalance').get(function() {
 });
 
 // Indexes for better query performance
-facultySchema.index({ employeeId: 1 });
+// Removed explicit employeeId index to avoid duplication with unique: true on field
 facultySchema.index({ department: 1 });
 facultySchema.index({ designation: 1 });
 facultySchema.index({ status: 1 });

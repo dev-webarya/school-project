@@ -233,7 +233,7 @@ feeStructureSchema.index({ class: 1, academicYear: 1 });
 feeStructureSchema.index({ isActive: 1 });
 
 feePaymentSchema.index({ student: 1, academicYear: 1 });
-feePaymentSchema.index({ 'paymentDetails.receiptNumber': 1 });
+// Removed explicit receiptNumber index to avoid duplication with unique: true on field
 feePaymentSchema.index({ 'paymentDetails.paymentDate': 1 });
 feePaymentSchema.index({ status: 1 });
 
