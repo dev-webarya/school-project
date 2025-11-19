@@ -71,7 +71,7 @@ export default function FacultyDashboard() {
   }
 
   const stats = [
-    { title: 'Classes Today', value: dashboardData?.stats?.classesToday || 0, icon: <FaChalkboardTeacher />, color: '#1a237e', to: '/faculty/attendance' },
+    { title: 'Classes Today', value: dashboardData?.stats?.classesToday || 0, icon: <FaChalkboardTeacher />, color: '#1a237e' },
     { title: 'Active Courses', value: dashboardData?.stats?.activeCourses || 0, icon: <FaClipboardList />, color: '#0d1757', to: '/faculty/courses' },
     { title: 'Total Students', value: dashboardData?.stats?.totalStudents || 0, icon: <FaUsers />, color: '#3f51b5' },
     { title: 'Assignments', value: dashboardData?.stats?.totalAssignments || 0, icon: <FaTasks />, color: '#2e7d32', to: '/faculty/assignments' },
@@ -136,6 +136,37 @@ export default function FacultyDashboard() {
             </Link>
           ) : card;
         })}
+      </div>
+
+      <div style={{ marginTop: '30px' }}>
+        <div style={{ background: 'white', borderRadius: '8px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
+          <h2 style={{ marginTop: 0, fontSize: '1.2rem' }}>Today's Classes</h2>
+          <div>
+            {dashboardData?.upcomingClasses?.length > 0 ? dashboardData.upcomingClasses.map((cls, idx) => (
+              <div key={cls.id || idx} style={{ padding: '12px 0', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <p style={{ margin: '0 0 4px 0', fontSize: '0.9rem' }}>
+                    <strong>{
+                      (typeof cls.time === 'string' && cls.time)
+                        ? (/AM|PM/i.test(cls.time)
+                            ? cls.time
+                            : new Date(`1970-01-01T${cls.time}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }))
+                        : '—'
+                    }</strong> • {(cls.subject || cls.course)}
+                  </p>
+                  <span style={{ fontSize: '0.8rem', color: '#888' }}>
+                    {cls.class} • Room: {cls.room || 'N/A'}
+                  </span>
+                </div>
+                <span style={{ padding: '2px 6px', borderRadius: '12px', fontSize: '0.7rem', background: '#fff3e0', color: '#ef6c00' }}>
+                  today
+                </span>
+              </div>
+            )) : (
+              <p style={{ color: '#888', textAlign: 'center', padding: '20px 0' }}>No classes scheduled for today</p>
+            )}
+          </div>
+        </div>
       </div>
 
       <div style={{ marginTop: '30px' }}>

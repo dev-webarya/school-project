@@ -67,16 +67,17 @@ router.get('/dashboard', authenticateToken, requireRole(['faculty']), async (req
       activeCourses = distinctCourseIds.size;
     }
 
-    // Upcoming classes for today from Schedule
+    // Upcoming classes for today derived from Schedule and Admin assignments
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const todayDay = days[new Date().getDay()];
+    const todayDate = new Date();
     let upcomingClasses = [];
     let classesToday = 0;
     if (facultyProfile) {
-      const schedules = await Schedule.find({ faculty: facultyProfile._id, day: todayDay })
+      // Real timetable entries linked to this faculty for today
+      let schedules = await Schedule.find({ faculty: facultyProfile._id, day: todayDay })
         .sort({ startTime: 1 })
         .lean();
-      classesToday = schedules.length;
       upcomingClasses = schedules.map((s, idx) => ({
         id: idx + 1,
         time: s.startTime,
@@ -85,11 +86,85 @@ router.get('/dashboard', authenticateToken, requireRole(['faculty']), async (req
         class: s.className || 'N/A',
         subject: s.subject || 'N/A'
       }));
+
+      // Fallback: match by teacher name if faculty link is missing
+      if (upcomingClasses.length === 0) {
+        const facultyName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim();
+        if (facultyName) {
+          const nameRegex = new RegExp(`^${facultyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+          schedules = await Schedule.find({ day: todayDay, teacher: nameRegex })
+            .sort({ startTime: 1 })
+            .lean();
+          upcomingClasses = schedules.map((s, idx) => ({
+            id: idx + 1,
+            time: s.startTime,
+            course: `${s.subject || 'Subject'}${s.description ? ' - ' + s.description : ''}`,
+            room: s.room || 'N/A',
+            class: s.className || 'N/A',
+            subject: s.subject || 'N/A'
+          }));
+        }
+      }
+
+      // Admin-assigned classes that fall within today's date range (start/end)
+      const allAssignments = await FacultyAssignment.find({ facultyId: facultyProfile._id }).lean();
+      const isTodayInRange = (a) => {
+        const s = a.startDate ? new Date(a.startDate) : null;
+        const e = a.endDate ? new Date(a.endDate) : null;
+        if (s && todayDate < s) return false;
+        if (e && todayDate > e) return false;
+        return true;
+      };
+      const todayAssignments = allAssignments.filter(isTodayInRange);
+
+      // Avoid duplicating entries already represented by schedules
+      const existingKeys = new Set(upcomingClasses.map(c => `${c.class}|${c.subject}`));
+      todayAssignments.forEach((a, idx) => {
+        const clsName = a.classId || 'N/A';
+        const subj = (typeof a.courseId === 'string' && a.courseId.trim()) ? a.courseId : 'Assigned Class';
+        const key = `${clsName}|${subj}`;
+        if (!existingKeys.has(key)) {
+          upcomingClasses.push({
+            id: upcomingClasses.length + idx + 1,
+            time: '',
+            course: subj,
+            room: 'N/A',
+            class: clsName,
+            subject: subj
+          });
+        }
+      });
+
+      // Use total upcoming classes count for the stat
+      classesToday = upcomingClasses.length;
     }
 
-    // Recent activities from assignment submissions created via faculty-created assignments
+    // Global fallback: if no faculty profile or no linked schedules, match by teacher name
+    if (upcomingClasses.length === 0) {
+      const facultyName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim();
+      if (facultyName) {
+        const nameRegex = new RegExp(`^${facultyName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        const schedulesByName = await Schedule.find({ day: todayDay, teacher: nameRegex })
+          .sort({ startTime: 1 })
+          .lean();
+        upcomingClasses = schedulesByName.map((s, idx) => ({
+          id: idx + 1,
+          time: s.startTime,
+          course: `${s.subject || 'Subject'}${s.description ? ' - ' + s.description : ''}`,
+          room: s.room || 'N/A',
+          class: s.className || 'N/A',
+          subject: s.subject || 'N/A'
+        }));
+      }
+      classesToday = upcomingClasses.length;
+    }
+
+    // Recent activity: merge assignment submissions and timetable updates
     let recentActivities = [];
     try {
+      const events = [];
+
+      // Assignment submissions
       const assignments = await Assignment.find({ createdBy: facultyProfile?._id }).select('class section');
       const assignmentIds = assignments.map(a => a._id);
       if (assignmentIds.length) {
@@ -100,29 +175,49 @@ router.get('/dashboard', authenticateToken, requireRole(['faculty']), async (req
           .sort({ submittedAt: -1 })
           .limit(10);
 
-        recentActivities = submissions.map((s, idx) => ({
-          id: idx + 1,
-          type: 'assignment',
-          message: `New assignment submitted by ${
-            s.student?.user ? `${s.student.user.firstName || ''} ${s.student.user.lastName || ''}`.trim() : (s.student?.studentId || 'Student')
-          }`,
-          time: getTimeAgo(s.submittedAt),
-          class: `${s.assignment?.class || ''}${s.assignment?.section ? '-' + s.assignment.section : ''}`.trim() || 'N/A'
-        }));
+        submissions.forEach((s) => {
+          events.push({
+            ts: s.submittedAt,
+            type: 'assignment',
+            message: `New assignment submitted by ${
+              s.student?.user ? `${s.student.user.firstName || ''} ${s.student.user.lastName || ''}`.trim() : (s.student?.studentId || 'Student')
+            }`,
+            class: `${s.assignment?.class || ''}${s.assignment?.section ? '-' + s.assignment.section : ''}`.trim() || 'N/A'
+          });
+        });
       }
+
+      // Timetable changes (recent schedules linked to this faculty)
+      if (facultyProfile?._id) {
+        const recentSchedules = await Schedule.find({ faculty: facultyProfile._id })
+          .sort({ updatedAt: -1 })
+          .limit(10)
+          .lean();
+
+        recentSchedules.forEach((s) => {
+          events.push({
+            ts: s.updatedAt || s.createdAt,
+            type: 'schedule',
+            message: `Timetable updated: ${s.subject || 'Subject'} for ${s.className || 'Class'} on ${s.day} (${s.startTime} - ${s.endTime})`,
+            class: s.className || 'N/A'
+          });
+        });
+      }
+
+      // Sort by timestamp desc and map to display shape
+      events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+      recentActivities = events.slice(0, 10).map((e, idx) => ({
+        id: idx + 1,
+        type: e.type,
+        message: e.message,
+        time: getTimeAgo(e.ts),
+        class: e.class
+      }));
     } catch (e) {
       console.warn('Recent activities generation error:', e.message);
     }
 
-    // Fallback sample data if nothing available
-    if (!classesToday && upcomingClasses.length === 0) {
-      upcomingClasses = [
-        { id: 1, time: '09:00 AM', course: 'Mathematics - Algebra', room: 'Room 201', class: '10-A', subject: 'Mathematics' },
-        { id: 2, time: '10:00 AM', course: 'Physics - Motion', room: 'Lab 2', class: '10-A', subject: 'Physics' },
-        { id: 3, time: '11:00 AM', course: 'Mathematics - Geometry', room: 'Room 203', class: '10-B', subject: 'Mathematics' }
-      ];
-      classesToday = 3;
-    }
+    // No dummy fallback — show empty when no classes are scheduled or assigned for today
 
     const dashboardData = {
       stats: {
