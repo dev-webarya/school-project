@@ -179,7 +179,7 @@ app.use(express.static(distPath));
 // SPA fallback: send index.html for non-API routes
 // SPA fallback without path pattern to avoid path-to-regexp issues
 app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
+  if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(distPath, 'index.html'));
 });
 
