@@ -173,6 +173,7 @@ app.get('/health', (req, res) => {
 
 // Serve frontend production build (same-origin) to avoid CORS in production
 const distPath = path.join(__dirname, '../../dist');
+
 app.use(express.static(distPath));
 
 // SPA fallback: send index.html for non-API routes

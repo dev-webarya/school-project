@@ -7,11 +7,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "start": "node backend/server.js",
     "lint": "eslint src --ext js,jsx --quiet",
     "lint:fix": "eslint . --ext js,jsx --fix",
-    "format": "prettier --write \"src/**/*.{js,jsx,css}\"",
-    "preview": "vite preview",
-    "start:prod": "npm run build && npm run preview"
+    "format": "prettier --write \"src/**/*.{js,jsx,css}\""
   },
   "dependencies": {
     "axios": "^1.13.1",
