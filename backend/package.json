@@ -13,7 +13,8 @@
     "lint:fix": "eslint src/ --ext .js --fix",
     "format": "prettier --write \"src/**/*.js\"",
     "build": "echo \"Production build ready\"",
-    "start:prod": "cross-env NODE_ENV=production node src/server.js"
+    "start:prod": "node src/server.js"
+  
   },
   "keywords": [
     "school",
