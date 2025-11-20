@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -171,17 +172,20 @@ app.get('/health', (req, res) => {
   app.use('/api/transport', require('./routes/transport'));
   app.use('/api/payments', require('./routes/payments'));
 
-// Serve frontend production build (same-origin) to avoid CORS in production
 const distPath = path.join(__dirname, '../../dist');
 
-app.use(express.static(distPath));
-
-// SPA fallback: send index.html for non-API routes
-// SPA fallback without path pattern to avoid path-to-regexp issues
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+if (fs.existsSync(path.join(distPath, 'index.html'))) {
+  app.use(express.static(distPath));
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+} else {
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.status(404).json({ success: false, message: 'Frontend build not found' });
+  });
+}
 
 // 404 handler - must be last
 app.use((req, res) => {
