@@ -46,6 +46,7 @@ const config = {
   // Additional Feature Flags
   ENABLE_DEBUG: ENV.VITE_ENABLE_DEBUG === 'true',
   ENABLE_MOCK_DATA: ENV.VITE_ENABLE_MOCK_DATA === 'true',
+  RAZORPAY_KEY_ID: ENV.VITE_RAZORPAY_KEY_ID || '',
 
   // Class configuration (used across dropdowns)
   CLASSES: [

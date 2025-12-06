@@ -64,6 +64,13 @@ const About = () => {
           
           <div className="team-grid">
             <div className="team-member">
+              <img src="https://i.ibb.co/gBWND5J/upscalemedia-transformed-2.png" alt="Academic & Managing Director" />
+              <h3>Mr. Sunil Yadav</h3>
+              <p className="member-position">Academic & 
+Managing Director</p>
+              <p>Mr. Sunil Yadav, our Academic and Managing Director, oversees teaching methodologies, faculty development programs, and ensures the overall academic excellence and operational growth of the institution.</p>
+            </div>
+            <div className="team-member">
               <img src="https://i.ibb.co/gM824Tzw/upscalemedia-transformed.png" alt="Principal" />
               <h3>Mr. Pramod Yadav
 </h3>
@@ -80,13 +87,6 @@ const About = () => {
  ensures our academic programs meet the highest standards.</p>
             </div>
             
-            <div className="team-member">
-              <img src="https://i.ibb.co/gBWND5J/upscalemedia-transformed-2.png" alt="Academic & Managing Director" />
-              <h3>Mr. Sunil Yadav</h3>
-              <p className="member-position">Academic & 
-Managing Director</p>
-              <p>Mr. Sunil Yadav, our Academic and Managing Director, oversees teaching methodologies, faculty development programs, and ensures the overall academic excellence and operational growth of the institution.</p>
-            </div>
           </div>
         </div>
       </section>
@@ -104,7 +104,7 @@ Managing Director</p>
               <p>Expert Faculty</p>
             </div>
             <div className="stat-item">
-              <h3>500+</h3>
+              <h3>5000+</h3>
               <p>Successful Alumni</p>
             </div>
             <div className="stat-item">

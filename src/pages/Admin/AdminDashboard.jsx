@@ -488,6 +488,8 @@ export default function AdminDashboard() {
         }
 
         .action-btn:hover {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: #fff;
           transform: translateY(-2px);
           box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }

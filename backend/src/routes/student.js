@@ -473,7 +473,28 @@ router.get('/fees', authenticateToken, requireRole(['student']), async (req, res
     const currentYear = new Date().getFullYear();
     const academicYear = student.academicYear || `${currentYear}-${currentYear + 1}`;
 
-    const feeStructure = await FeeStructure.findOne({ class: student.class, academicYear, isActive: true });
+    let feeStructure = await FeeStructure.findOne({ class: student.class, academicYear, isActive: true });
+
+    if (!feeStructure) {
+      const totalFromStudent = Number(student.feeStructure?.admissionFee || 0) +
+        Number(student.feeStructure?.tuitionFee || 0) +
+        Number(student.feeStructure?.examFee || 0) +
+        Number(student.feeStructure?.libraryFee || 0) +
+        Number(student.feeStructure?.sportsFee || 0) +
+        Number(student.feeStructure?.transportFee || 0) +
+        Number(student.feeStructure?.otherFees || 0);
+      const baseAmount = totalFromStudent > 0 ? totalFromStudent : 0;
+      if (baseAmount > 0) {
+        feeStructure = await FeeStructure.create({
+          class: student.class,
+          academicYear,
+          feeComponents: { tuitionFee: baseAmount },
+          paymentSchedule: 'yearly',
+          isActive: true,
+          createdBy: student.user
+        });
+      }
+    }
 
     if (feeStructure) {
       const existingDuesCount = await FeeDue.countDocuments({ student: student._id, academicYear, feeStructure: feeStructure._id });
@@ -625,7 +646,7 @@ router.post('/fees/payment', authenticateToken, requireRole(['student']), async 
       return res.status(201).json({ success: true, message: 'Payment recorded (E2E)', data: { payment } });
     }
 
-    const { dueId, paymentMethod } = req.body || {};
+    const { dueId, paymentMethod, transactionId } = req.body || {};
     const student = await Student.findOne({ user: req.user._id || req.user.id });
     if (!student) {
       return res.status(404).json({ success: false, message: 'Student profile not found' });
@@ -652,6 +673,7 @@ router.post('/fees/payment', authenticateToken, requireRole(['student']), async 
       paymentDetails: {
         amount: amountToPay,
         paymentMethod: String(paymentMethod || 'online'),
+        transactionId: transactionId ? String(transactionId) : undefined,
         paymentDate: new Date()
       },
       feeBreakdown: {},

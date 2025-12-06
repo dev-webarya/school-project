@@ -253,7 +253,7 @@ feeDueSchema.virtual('remainingAmount').get(function() {
 });
 
 // Pre-save middleware to generate receipt number
-feePaymentSchema.pre('save', async function(next) {
+feePaymentSchema.pre('validate', async function(next) {
   if (this.isNew && !this.paymentDetails.receiptNumber) {
     const year = new Date().getFullYear();
     const count = await this.constructor.countDocuments({

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import config from '../../config/config.js';
-import { studentAPI } from '../../services/api.js';
-import { FaCalendarAlt, FaBook, FaGraduationCap, FaChalkboard, FaFileAlt, FaCreditCard, FaUsers, FaClipboardCheck, FaCalendarCheck, FaClipboardList } from 'react-icons/fa';
+import { studentAPI, paymentsAPI } from '../../services/api.js';
+import { FaCalendarAlt, FaBook, FaGraduationCap, FaChalkboard, FaFileAlt, FaCreditCard, FaUsers, FaClipboardCheck, FaCalendarCheck, FaClipboardList, FaExclamationTriangle, FaClock, FaDownload } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import './StudentDashboard.css';
@@ -12,6 +12,9 @@ export default function StudentDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [attendancePercent, setAttendancePercent] = useState(null);
+  const [fees, setFees] = useState([]);
+  const [isFeeLoading, setIsFeeLoading] = useState(false);
+  const [selectedFee, setSelectedFee] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -52,6 +55,93 @@ export default function StudentDashboard() {
     fetchAttendanceSummary();
   }, []);
 
+  useEffect(() => {
+    const loadFees = async () => {
+      setIsFeeLoading(true);
+      try {
+        const res = await studentAPI.getFees();
+        const payload = res?.data?.data || {};
+        const dues = Array.isArray(payload.dues) ? payload.dues : [];
+        const payments = Array.isArray(payload.payments) ? payload.payments : [];
+        const normalized = dues.map(d => ({
+          id: String(d._id || Math.random()),
+          type: `Installment ${d.installmentNumber}`,
+          amount: Number(d.amount || 0),
+          dueDate: d.dueDate || new Date().toISOString(),
+          status: d.status || 'pending',
+          paidDate: d.status === 'paid' ? (payments.find(p => p.installmentNumber === d.installmentNumber)?.paymentDetails?.paymentDate || null) : null
+        }));
+        setFees(normalized);
+      } catch (_) {
+        setFees([]);
+      } finally {
+        setIsFeeLoading(false);
+      }
+    };
+    loadFees();
+  }, []);
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'paid': return '#28a745';
+      case 'pending': return '#ffc107';
+      case 'overdue': return '#dc3545';
+      default: return '#6c757d';
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'paid': return <FaDownload />;
+      case 'pending': return <FaClock />;
+      case 'overdue': return <FaExclamationTriangle />;
+      default: return <FaClock />;
+    }
+  };
+
+  const handlePayNow = async (fee) => {
+    try {
+      setSelectedFee(fee);
+      const create = await paymentsAPI.create({ amount: fee.amount, currency: 'INR', description: fee.type, metadata: { dueId: fee.id } });
+      const { intent, keyId } = create.data || {};
+      const load = await new Promise((resolve, reject) => {
+        if (window.Razorpay) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = () => resolve(true);
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+      void load;
+      const options = {
+        key: keyId || config.RAZORPAY_KEY_ID,
+        amount: intent?.amount,
+        currency: intent?.currency || 'INR',
+        name: config.APP_NAME,
+        description: fee.type,
+        order_id: intent?.id,
+        prefill: {},
+        handler: async (response) => {
+          try {
+            await paymentsAPI.capture({ paymentId: response.razorpay_payment_id, orderId: response.razorpay_order_id, signature: response.razorpay_signature });
+            const res = await studentAPI.payFees({ dueId: fee.id, paymentMethod: 'online', transactionId: response.razorpay_payment_id });
+            const p = res?.data?.data?.payment;
+            setFees(prev => prev.map(f => f.id === fee.id ? { ...f, status: 'paid', paidDate: new Date().toISOString() } : f));
+          } catch (e) {
+            alert(e.userMessage || 'Payment verification failed');
+          } finally {
+            setSelectedFee(null);
+          }
+        }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (error) {
+      alert(error.userMessage || 'Payment failed. Please try again.');
+      setSelectedFee(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container" style={{ padding: '40px 0', textAlign: 'center' }}>
@@ -74,6 +164,8 @@ export default function StudentDashboard() {
   }
 
   const assignments = dashboardData?.assignments?.list || [];
+  const totalPending = fees.filter(f => f.status !== 'paid').reduce((sum, f) => sum + f.amount, 0);
+  const totalPaid = fees.filter(f => f.status === 'paid').reduce((sum, f) => sum + f.amount, 0);
 
   return (
     <div className="container" style={{ padding: '40px 0' }}>
@@ -99,6 +191,65 @@ export default function StudentDashboard() {
         <p style={{ margin: '6px 0', color: '#555' }}>
           Email: <strong>{dashboardData?.studentInfo?.email || 'N/A'}</strong>
         </p>
+      </div>
+
+      <div style={{
+        background: 'white',
+        borderRadius: '8px',
+        padding: '20px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+        marginTop: '20px'
+      }}>
+        <h2 style={{ margin: '0 0 15px 0' }}>Fee Payment</h2>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '15px',
+          marginBottom: '15px'
+        }}>
+          <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <h3 style={{ margin: 0 }}>Total Pending</h3>
+            <p style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700 }}>₹{totalPending.toLocaleString()}</p>
+          </div>
+          <div style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', color: 'white', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <h3 style={{ margin: 0 }}>Total Paid</h3>
+            <p style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700 }}>₹{totalPaid.toLocaleString()}</p>
+          </div>
+          <div style={{ background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)', color: 'white', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+            <h3 style={{ margin: 0 }}>Total Fees</h3>
+            <p style={{ margin: 0, fontSize: '1.6rem', fontWeight: 700 }}>₹{(totalPending + totalPaid).toLocaleString()}</p>
+          </div>
+        </div>
+
+        <div>
+          {(isFeeLoading ? [] : fees).map((fee) => (
+            <div key={fee.id} style={{ border: '1px solid #e9ecef', borderRadius: '8px', padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', background: fee.status === 'overdue' ? '#fff5f5' : '#fff' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                  <h4 style={{ margin: 0 }}>{fee.type}</h4>
+                  <span style={{ color: getStatusColor(fee.status), display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.9rem' }}>
+                    {getStatusIcon(fee.status)}
+                    {fee.status.charAt(0).toUpperCase() + fee.status.slice(1)}
+                  </span>
+                </div>
+                <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Due: {new Date(fee.dueDate).toLocaleDateString()}{fee.paidDate && ` • Paid: ${new Date(fee.paidDate).toLocaleDateString()}`}</p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <p style={{ margin: '0 0 10px 0', fontSize: '1.1rem', fontWeight: 600 }}>₹{fee.amount.toLocaleString()}</p>
+                {fee.status !== 'paid' && (
+                  <button onClick={() => handlePayNow(fee)} style={{ background: fee.status === 'overdue' ? '#dc3545' : '#1a237e', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '5px', cursor: 'pointer' }}>
+                    Pay Now
+                  </button>
+                )}
+                {fee.status === 'paid' && (
+                  <button style={{ background: '#6c757d', color: 'white', border: 'none', padding: '8px 14px', borderRadius: '5px', cursor: 'pointer' }}>
+                    <FaDownload style={{ marginRight: '6px' }} /> Receipt
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Stats Cards */}

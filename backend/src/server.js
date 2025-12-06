@@ -6,6 +6,10 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
+try {
+  const envPath = path.join(__dirname, '.env');
+  require('dotenv').config({ path: envPath });
+} catch (_) { }
 const { csrfCheck } = require('./middleware/csrf');
 const { User } = require('./models');
 const emailService = require('./services/emailService');
@@ -117,7 +121,7 @@ app.use(cors({
 
     const o = normalize(origin);
     // Allow explicit whitelist and common dev localhost patterns
-    if (allowedOrigins.includes(o) || (isDev && devOriginPattern.test(o))) {
+    if (allowedOrigins.includes(o) || devOriginPattern.test(o) || process.env.RELAX_CORS === 'true') {
       return callback(null, true);
     }
     return callback(new Error('CORS: Origin not allowed'));

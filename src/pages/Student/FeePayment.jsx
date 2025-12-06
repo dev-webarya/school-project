@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FaCreditCard, FaUniversity, FaWallet, FaDownload, FaCheckCircle, FaExclamationTriangle, FaClock } from 'react-icons/fa';
-import { studentAPI } from '../../services/api';
+import { studentAPI, paymentsAPI } from '../../services/api';
+import config from '../../config/config.js';
 
 export default function FeePayment() {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('card');
@@ -8,6 +9,9 @@ export default function FeePayment() {
   const [selectedFee, setSelectedFee] = useState(null);
   const [fees, setFees] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [studentProfile, setStudentProfile] = useState(null);
+  const [quickPayAmount, setQuickPayAmount] = useState('');
+  const [summary, setSummary] = useState({ totalDue: 0, totalPaid: 0, totalFeeAmount: 0 });
 
   useEffect(() => {
     const loadFees = async () => {
@@ -15,6 +19,7 @@ export default function FeePayment() {
       try {
         const res = await studentAPI.getFees();
         const payload = res?.data?.data || {};
+        setStudentProfile(payload.student || null);
         const dues = Array.isArray(payload.dues) ? payload.dues : [];
         const payments = Array.isArray(payload.payments) ? payload.payments : [];
         const normalized = dues.map(d => ({
@@ -28,6 +33,14 @@ export default function FeePayment() {
           paidDate: d.status === 'paid' ? (payments.find(p => p.installmentNumber === d.installmentNumber)?.paymentDetails?.paymentDate || null) : null
         }));
         setFees(normalized);
+        const srvSummary = payload.summary || { totalDue: 0, totalPaid: 0, totalFeeAmount: 0 };
+        setSummary({
+          totalDue: Number(srvSummary.totalDue || 0),
+          totalPaid: Number(srvSummary.totalPaid || 0),
+          totalFeeAmount: Number(srvSummary.totalFeeAmount || 0)
+        });
+        const pendingTotal = Number(srvSummary.totalDue || 0);
+        if (!quickPayAmount) setQuickPayAmount(String(pendingTotal || ''));
         setHistory(payments.map(p => ({
           id: String(p._id || Math.random()),
           type: `Installment ${p.installmentNumber}`,
@@ -74,35 +87,123 @@ export default function FeePayment() {
   const processPayment = async () => {
     if (!selectedFee) return;
     try {
-      const res = await studentAPI.payFees({ dueId: selectedFee.id, paymentMethod: selectedPaymentMethod });
-      const p = res?.data?.data?.payment;
-      alert(`Payment of ₹${selectedFee.amount} processed successfully!`);
-      setFees(prev => prev.map(f => f.id === selectedFee.id ? { ...f, status: 'paid', paidDate: new Date().toISOString() } : f));
-      if (p) {
-        setHistory(prev => [{
-          id: String(p._id || Math.random()),
-          type: `Installment ${p.installmentNumber}`,
-          amount: Number(p.paymentDetails?.amount || 0),
-          date: p.paymentDetails?.paymentDate || new Date().toISOString(),
-          transactionId: p.paymentDetails?.transactionId || '',
-          method: p.paymentDetails?.paymentMethod || ''
-        }, ...prev]);
-      }
+      const create = await paymentsAPI.create({ amount: selectedFee.amount, currency: 'INR', description: selectedFee.type, metadata: { dueId: selectedFee.id } });
+      const { intent, keyId } = create.data || {};
+      const load = await new Promise((resolve, reject) => {
+        if (window.Razorpay) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = () => resolve(true);
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+      void load;
+      const options = {
+        key: keyId || config.RAZORPAY_KEY_ID,
+        amount: intent?.amount,
+        currency: intent?.currency || 'INR',
+        name: config.APP_NAME,
+        description: selectedFee.type,
+        order_id: intent?.id,
+        prefill: {},
+        handler: async (response) => {
+          try {
+            const cap = await paymentsAPI.capture({ paymentId: response.razorpay_payment_id, orderId: response.razorpay_order_id, signature: response.razorpay_signature });
+            void cap;
+            const res = await studentAPI.payFees({ dueId: selectedFee.id, paymentMethod: 'online', transactionId: response.razorpay_payment_id });
+            const p = res?.data?.data?.payment;
+            alert(`Payment of ₹${selectedFee.amount} processed successfully!`);
+            setFees(prev => prev.map(f => f.id === selectedFee.id ? { ...f, status: 'paid', paidDate: new Date().toISOString() } : f));
+            setSummary(prev => ({
+              totalDue: Math.max(0, Number(prev.totalDue || 0) - Number(selectedFee.amount || 0)),
+              totalPaid: Number(prev.totalPaid || 0) + Number(selectedFee.amount || 0),
+              totalFeeAmount: Number(prev.totalFeeAmount || 0)
+            }));
+            if (p) {
+              setHistory(prev => [{
+                id: String(p._id || Math.random()),
+                type: `Installment ${p.installmentNumber}`,
+                amount: Number(p.paymentDetails?.amount || 0),
+                date: p.paymentDetails?.paymentDate || new Date().toISOString(),
+                transactionId: p.paymentDetails?.transactionId || '',
+                method: p.paymentDetails?.paymentMethod || ''
+              }, ...prev]);
+            }
+          } catch (e) {
+            alert(e.userMessage || 'Payment verification failed');
+          } finally {
+            setShowPaymentModal(false);
+            setSelectedFee(null);
+          }
+        }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
     } catch (error) {
       alert(error.userMessage || 'Payment failed. Please try again.');
-    } finally {
       setShowPaymentModal(false);
       setSelectedFee(null);
     }
   };
 
-  const totalPending = fees
-    .filter(fee => fee.status !== 'paid')
-    .reduce((sum, fee) => sum + fee.amount, 0);
+  const processQuickPay = async () => {
+    const amt = Number(quickPayAmount || 0);
+    if (!amt || amt <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+    try {
+      const create = await paymentsAPI.create({ amount: amt, currency: 'INR', description: 'Fee Payment', metadata: { source: 'quickPay' } });
+      const { intent, keyId } = create.data || {};
+      const load = await new Promise((resolve, reject) => {
+        if (window.Razorpay) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = () => resolve(true);
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+      void load;
+      const options = {
+        key: keyId || config.RAZORPAY_KEY_ID,
+        amount: intent?.amount,
+        currency: intent?.currency || 'INR',
+        name: config.APP_NAME,
+        description: 'Fee Payment',
+        order_id: intent?.id,
+        prefill: { name: studentProfile?.name },
+        handler: async (response) => {
+          try {
+            const cap = await paymentsAPI.capture({
+              paymentId: response.razorpay_payment_id,
+              orderId: response.razorpay_order_id,
+              signature: response.razorpay_signature,
+              studentId: studentProfile?.studentId,
+              studentName: studentProfile?.name,
+              class: studentProfile?.class,
+              amount: amt
+            });
+            void cap;
+            alert(`Payment of ₹${amt} processed successfully!`);
+            setSummary(prev => ({
+              totalDue: Math.max(0, Number(prev.totalDue || 0) - Number(amt || 0)),
+              totalPaid: Number(prev.totalPaid || 0) + Number(amt || 0),
+              totalFeeAmount: Number(prev.totalFeeAmount || 0)
+            }));
+          } catch (e) {
+            alert(e.userMessage || 'Payment verification failed');
+          }
+        }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (error) {
+      alert(error.userMessage || 'Payment failed. Please try again.');
+    }
+  };
 
-  const totalPaid = fees
-    .filter(fee => fee.status === 'paid')
-    .reduce((sum, fee) => sum + fee.amount, 0);
+  const totalPending = Number(summary.totalDue || 0);
+  const totalPaid = Number(summary.totalPaid || 0);
 
   return (
     <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
@@ -159,6 +260,34 @@ export default function FeePayment() {
       }}>
         <h2 style={{ marginBottom: '20px', color: '#333' }}>Current Session Fees</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+          {(!isLoading && fees.length === 0) && (
+            <div style={{
+              border: '1px solid #e9ecef',
+              borderRadius: '8px',
+              padding: '20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#fff'
+            }}>
+              <div style={{ flex: 1 }}>
+                <h4 style={{ margin: 0, color: '#333' }}>Quick Pay</h4>
+                <p style={{ margin: '6px 0', color: '#666', fontSize: '0.9rem' }}>Enter amount to pay your fees online</p>
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                  <input type="number" min="1" value={quickPayAmount} onChange={(e) => setQuickPayAmount(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e0e0e0' }} />
+                  <span style={{ color: '#333', fontWeight: 600 }}>₹</span>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <button
+                  onClick={processQuickPay}
+                  style={{ background: '#007bff', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '5px', cursor: 'pointer', fontSize: '0.9rem' }}
+                >
+                  Pay Now
+                </button>
+              </div>
+            </div>
+          )}
           {(isLoading ? [] : fees).map(fee => (
             <div key={fee.id} style={{
               border: '1px solid #e9ecef',

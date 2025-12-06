@@ -11,6 +11,8 @@ const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.DEV
 // Loading state management
 let loadingRequests = new Set();
 let loadingCallbacks = new Set();
+let isRefreshing = false;
+let refreshSubscribers = [];
 
 export const apiLoadingState = {
   addCallback: (callback) => {
@@ -95,23 +97,54 @@ api.interceptors.response.use(
     // Enhanced error handling
     if (error.response?.status === 401) {
       const originalRequest = error.config;
-      if (!originalRequest?._retry) {
-        const rt = localStorage.getItem('refreshToken');
-        if (rt) {
-          try {
-            originalRequest._retry = true;
-            const res = await api.post('/auth/refresh', { refreshToken: rt });
-            const newToken = res.data?.data?.token;
-            const newRefresh = res.data?.data?.refreshToken;
-            if (newToken) {
-              localStorage.setItem('authToken', newToken);
-              if (newRefresh) localStorage.setItem('refreshToken', newRefresh);
-              originalRequest.headers = originalRequest.headers || {};
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
-              return api(originalRequest);
-            }
-          } catch (_) { void 0; }
+      if (String(originalRequest?.url || '').includes('/auth/refresh')) {
+        if (!config.IS_E2E) {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('userRole');
+          window.location.href = '/';
         }
+        return Promise.reject(error);
+      }
+      const rt = localStorage.getItem('refreshToken');
+      if (!rt) {
+        if (!config.IS_E2E) {
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('refreshToken');
+          localStorage.removeItem('userRole');
+          window.location.href = '/';
+        }
+        return Promise.reject(error);
+      }
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          refreshSubscribers.push((token) => {
+            if (!token) return reject(error);
+            originalRequest.headers = originalRequest.headers || {};
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            resolve(api(originalRequest));
+          });
+        });
+      }
+      try {
+        isRefreshing = true;
+        const res = await api.post('/auth/refresh', { refreshToken: rt });
+        const newToken = res.data?.data?.token;
+        const newRefresh = res.data?.data?.refreshToken;
+        isRefreshing = false;
+        const subs = refreshSubscribers.slice();
+        refreshSubscribers = [];
+        if (newToken) {
+          localStorage.setItem('authToken', newToken);
+          if (newRefresh) localStorage.setItem('refreshToken', newRefresh);
+          subs.forEach((cb) => { try { cb(newToken); } catch (_) { void 0; } });
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        }
+      } catch (_) {
+        isRefreshing = false;
+        refreshSubscribers = [];
       }
       if (!config.IS_E2E) {
         localStorage.removeItem('authToken');
@@ -346,6 +379,11 @@ export const generalAPI = {
   getEvents: (params = {}) => api.get('/general/events', { params }),
   // Public subjects (basic info only)
   getPublicSubjects: (params = {}) => api.get('/general/subjects/public', { params }),
+};
+
+export const paymentsAPI = {
+  create: (payload) => api.post('/payments/create', payload),
+  capture: (payload) => api.post('/payments/capture', payload)
 };
 
 // Admin Calendar API calls (manage AcademicCalendar)

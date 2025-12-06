@@ -4,13 +4,14 @@ import './FeePayment.css';
 
 // Add jsPDF import
 import jsPDF from 'jspdf';
-import { studentAPI } from '../../services/api.js';
+import { studentAPI, paymentsAPI } from '../../services/api.js';
+import config from '../../config/config.js';
 
 const FeePayment = () => {
   const [activeTab, setActiveTab] = useState('card');
   const [studentInfo, setStudentInfo] = useState({
-    studentId: 'Student ID',
-    studentName: 'Student Name',
+    studentId: '',
+    studentName: '',
     class: '',
     feeAmount: ''
   });
@@ -56,25 +57,67 @@ const FeePayment = () => {
     });
   };
 
-  const handlePayment = (e) => {
+  const handlePayment = async (e) => {
     e.preventDefault();
-    // In a real application, this would process the payment
-    // For demo purposes, we'll simulate a successful payment
-    
-    const receiptNumber = `FEE-${Math.floor(Math.random() * 100000)}`;
-    const paymentDate = new Date().toLocaleDateString();
-    
-    setReceiptData({
-      receiptNumber,
-      paymentDate,
-      studentId: studentInfo.studentId,
-      studentName: studentInfo.studentName,
-      class: studentInfo.class,
-      amount: studentInfo.feeAmount,
-      paymentMethod: getPaymentMethodName(activeTab)
-    });
-    
-    setPaymentComplete(true);
+    try {
+      const amount = Number(studentInfo.feeAmount || 0);
+      if (!amount || amount <= 0) {
+        alert('Please select a class to auto-fill fee amount');
+        return;
+      }
+      const create = await paymentsAPI.create({ amount, currency: 'INR', description: 'Fee Payment', metadata: { studentId: studentInfo.studentId } });
+      const { intent, keyId } = create.data || {};
+      const load = await new Promise((resolve, reject) => {
+        if (window.Razorpay) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        s.onload = () => resolve(true);
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+      void load;
+      const options = {
+        key: keyId || config.RAZORPAY_KEY_ID,
+        amount: intent?.amount,
+        currency: intent?.currency || 'INR',
+        name: config.APP_NAME,
+        description: 'Fee Payment',
+        order_id: intent?.id,
+        prefill: { name: studentInfo.studentName },
+        handler: async (response) => {
+          try {
+            const cap = await paymentsAPI.capture({ 
+              paymentId: response.razorpay_payment_id, 
+              orderId: response.razorpay_order_id, 
+              signature: response.razorpay_signature,
+              studentId: studentInfo.studentId,
+              studentName: studentInfo.studentName,
+              class: studentInfo.class,
+              amount
+            });
+            const record = cap?.data?.record;
+            const receiptNumber = record?.paymentDetails?.receiptNumber || `FEE-${Math.floor(Math.random() * 100000)}`;
+            const paymentDate = record?.paymentDetails?.paymentDate ? new Date(record.paymentDetails.paymentDate).toLocaleDateString() : new Date().toLocaleDateString();
+            setReceiptData({
+              receiptNumber,
+              paymentDate,
+              studentId: studentInfo.studentId,
+              studentName: studentInfo.studentName,
+              class: studentInfo.class,
+              amount: String(amount),
+              paymentMethod: getPaymentMethodName(activeTab)
+            });
+            setPaymentComplete(true);
+          } catch (err) {
+            alert(err.userMessage || 'Payment verification failed');
+          }
+        }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err) {
+      alert(err.userMessage || 'Payment failed. Please try again.');
+    }
   };
 
   const getPaymentMethodName = (method) => {
@@ -122,10 +165,10 @@ const FeePayment = () => {
   const resetForm = () => {
     setPaymentComplete(false);
     setStudentInfo({
-      studentId: 'Student ID',
-      studentName: 'Student Name',
-      class: 'Class',
-      feeAmount: 'Fee Amount'
+      studentId: '',
+      studentName: '',
+      class: '',
+      feeAmount: ''
     });
   };
 
@@ -251,6 +294,7 @@ const FeePayment = () => {
                         id="studentId" 
                         name="studentId" 
                         value={studentInfo.studentId} 
+                        placeholder="Student ID"
                         onChange={handleStudentInfoChange} 
                         required 
                       />
@@ -263,6 +307,7 @@ const FeePayment = () => {
                         id="studentName" 
                         name="studentName" 
                         value={studentInfo.studentName} 
+                        placeholder="Student Name"
                         onChange={handleStudentInfoChange} 
                         required 
                       />

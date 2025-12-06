@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { FaBars, FaTimes, FaPhone, FaEnvelope, FaFacebookF, FaTwitter, FaInstagram, FaLinkedinIn, FaCaretDown, FaUserTie, FaChalkboardTeacher, FaUserGraduate, FaChevronRight, FaCalendarAlt, FaClipboardList, FaUserCog, FaBook, FaChalkboard, FaUserCheck, FaFileAlt, FaGraduationCap } from 'react-icons/fa';
 import './Navbar.css';
+import { useAuth } from '../../contexts/AuthContext';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -9,6 +10,8 @@ const Navbar = () => {
   const [activeSubmenu, setActiveSubmenu] = useState(null);
   const loginDropdownRef = useRef(null);
   const closeTimeoutRef = useRef(null);
+  const navigate = useNavigate();
+  const { isAuthenticated, logout } = useAuth();
 
   const toggleMenu = () => {
     setIsOpen(!isOpen);
@@ -130,55 +133,62 @@ const Navbar = () => {
               </NavLink>
             </li>
             <li className="nav-item login-item">
-              <div 
-                className="login-dropdown" 
-                ref={loginDropdownRef}
-                onMouseEnter={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); closeTimeoutRef.current = null; } setIsLoginDropdownOpen(true); }}
-                onMouseLeave={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); } closeTimeoutRef.current = setTimeout(() => { setIsLoginDropdownOpen(false); setActiveSubmenu(null); }, 5000); }}
-              >
-                <button className={`login-button ${isLoginDropdownOpen ? 'open' : ''}`} onClick={toggleLoginDropdown} aria-haspopup="true" aria-expanded={isLoginDropdownOpen}>
-                  Login <FaCaretDown />
+              {isAuthenticated ? (
+                <button
+                  className="login-button"
+                  onClick={async () => { await logout(); navigate('/'); closeMenu(); }}
+                >
+                  Logout
                 </button>
-                {isLoginDropdownOpen && (
-                  <div className="login-dropdown-content" role="menu">
-                    <div className="login-item">
-                      <Link 
-                        to="/admin-login" 
-                        className="login-item-header" 
-                        onClick={closeMenu}
-                        role="menuitem"
-                      >
-                        <div className="login-item-icon"><FaUserTie /></div>
-                        <div className="login-item-text">Admin Login</div>
-                      </Link>
+              ) : (
+                <div 
+                  className="login-dropdown" 
+                  ref={loginDropdownRef}
+                  onMouseEnter={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); closeTimeoutRef.current = null; } setIsLoginDropdownOpen(true); }}
+                  onMouseLeave={() => { if (closeTimeoutRef.current) { clearTimeout(closeTimeoutRef.current); } closeTimeoutRef.current = setTimeout(() => { setIsLoginDropdownOpen(false); setActiveSubmenu(null); }, 5000); }}
+                >
+                  <button className={`login-button ${isLoginDropdownOpen ? 'open' : ''}`} onClick={toggleLoginDropdown} aria-haspopup="true" aria-expanded={isLoginDropdownOpen}>
+                    Login <FaCaretDown />
+                  </button>
+                  {isLoginDropdownOpen && (
+                    <div className="login-dropdown-content" role="menu">
+                      <div className="login-item">
+                        <Link 
+                          to="/student-login" 
+                          className="login-item-header" 
+                          onClick={closeMenu}
+                          role="menuitem"
+                        >
+                          <div className="login-item-icon"><FaUserGraduate /></div>
+                          <div className="login-item-text">Student Login</div>
+                        </Link>
+                      </div>
+                      <div className="login-item">
+                        <Link 
+                          to="/faculty-login" 
+                          className="login-item-header" 
+                          onClick={closeMenu}
+                          role="menuitem"
+                        >
+                          <div className="login-item-icon"><FaChalkboardTeacher /></div>
+                          <div className="login-item-text">Faculty Login</div>
+                        </Link>
+                      </div>
+                      <div className="login-item">
+                        <Link 
+                          to="/admin-login" 
+                          className="login-item-header" 
+                          onClick={closeMenu}
+                          role="menuitem"
+                        >
+                          <div className="login-item-icon"><FaUserTie /></div>
+                          <div className="login-item-text">Admin Login</div>
+                        </Link>
+                      </div>
                     </div>
-                    
-                    <div className="login-item">
-                      <Link 
-                        to="/faculty-login" 
-                        className="login-item-header" 
-                        onClick={closeMenu}
-                        role="menuitem"
-                      >
-                        <div className="login-item-icon"><FaChalkboardTeacher /></div>
-                        <div className="login-item-text">Faculty Login</div>
-                      </Link>
-                    </div>
-                    
-                    <div className="login-item">
-                      <Link 
-                        to="/student-login" 
-                        className="login-item-header" 
-                        onClick={closeMenu}
-                        role="menuitem"
-                      >
-                        <div className="login-item-icon"><FaUserGraduate /></div>
-                        <div className="login-item-text">Student Login</div>
-                      </Link>
-                    </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </li>
           </ul>
         </div>
