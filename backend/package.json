@@ -14,7 +14,6 @@
     "format": "prettier --write \"src/**/*.js\"",
     "build": "echo \"Production build ready\"",
     "start:prod": "node src/server.js"
-  
   },
   "keywords": [
     "school",
@@ -43,7 +42,8 @@
     "nodemailer": "^7.0.10",
     "react-chartjs-2": "^5.3.1",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "razorpay": "^2.9.5"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",

@@ -1,0 +1,42 @@
+services:
+  # ----------------
+  # BACKEND SERVICE
+  # ----------------
+  backend:
+    container_name: school-backend
+    build:
+      context: ./backend
+    restart: always
+    ports:
+      - "5000:5000"
+    # Points to the backend folder's .env file
+    env_file:
+      - ./backend/.env
+    # Fallback to ensure port is set if .env is missed
+    environment:
+      - PORT=5000
+    # Google DNS to ensure MongoDB Atlas URL resolves correctly
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    networks:
+      - app-network
+
+  # ----------------
+  # FRONTEND SERVICE
+  # ----------------
+  frontend:
+    container_name: school-frontend
+    build:
+      context: .
+    restart: always
+    ports:
+      - "5177:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
