@@ -54,11 +54,48 @@ const Footer = () => {
         </div>
       </div>
       
-      <div className="footer-bottom">
+      {/* <div className="footer-bottom">
         <div className="container">
           <p>&copy; {new Date().getFullYear()} Baba Basudev. All Rights Reserved.</p>
         </div>
-      </div>
+      </div> */}
+      <div className="footer-bottom">
+  <div className="container footer-bottom-container">
+
+    {/* LEFT / CENTER TEXT */}
+    <span>
+      © 2026 Baba Basudev. All Rights Reserved.
+    </span>
+
+    {/* RIGHT CORNER CONTENT */}
+    <div className="footer-bottom-right">
+      <span> Designed & Developed by </span>
+
+      <a
+        href="https://webarya.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="highlight-link"
+      >
+        WebArya
+      </a>
+
+      <a href="tel:+919187385124" className="highlight-link">
+        📞 +91 9187 385 124
+      </a>
+
+      <a
+        href="https://wa.me/919187385124"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="highlight-link"
+      >
+        💬 WhatsApp
+      </a>
+    </div>
+
+  </div>
+</div>
     </footer>
   );
 };
